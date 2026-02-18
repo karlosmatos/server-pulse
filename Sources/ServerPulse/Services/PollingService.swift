@@ -30,7 +30,7 @@ struct PollingService {
         async let cpuOut     = try? ssh.run("top -bn1 | grep 'Cpu(s)'")
         async let ramOut     = try? ssh.run("free -m | grep '^Mem'")
         async let diskOut    = try? ssh.run("df -h / | tail -1")
-        async let psOut      = try? ssh.run("ps aux | grep -i python | grep -v grep")
+        async let psOut      = try? ssh.run("ps aux | grep -i python | grep -v grep | grep -v '^root'")
         async let uptimeOut  = try? ssh.run("uptime")
         async let workflows  = try? n8n.fetchWorkflows()
         async let executions = try? n8n.fetchRecentExecutions()

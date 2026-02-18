@@ -15,16 +15,16 @@ final class AppSettings: @unchecked Sendable {
     @UserDefault(key: "ssh.host",      defaultValue: "")
     var sshHost: String
 
-    @UserDefault(key: "ssh.user",      defaultValue: "root")
+    @UserDefault(key: "ssh.user",      defaultValue: "")
     var sshUser: String
 
-    @UserDefault(key: "ssh.keyPath",   defaultValue: "~/.ssh/id_ed25519")
+    @UserDefault(key: "ssh.keyPath",   defaultValue: "")
     var sshKeyPath: String
 
     @UserDefault(key: "ssh.port",      defaultValue: 22)
     var sshPort: Int
 
-    @UserDefault(key: "n8n.baseURL",   defaultValue: "http://localhost:5678")
+    @UserDefault(key: "n8n.baseURL",   defaultValue: "")
     var n8nBaseURL: String
 
     @UserDefault(key: "n8n.apiKey",    defaultValue: "")
@@ -34,8 +34,9 @@ final class AppSettings: @unchecked Sendable {
     var pollingInterval: Double
 
     var resolvedKeyPath: String {
-        sshKeyPath.hasPrefix("~")
-            ? (sshKeyPath as NSString).expandingTildeInPath
-            : sshKeyPath
+        let path = sshKeyPath.isEmpty ? "~/.ssh/id_ed25519" : sshKeyPath
+        return path.hasPrefix("~")
+            ? (path as NSString).expandingTildeInPath
+            : path
     }
 }

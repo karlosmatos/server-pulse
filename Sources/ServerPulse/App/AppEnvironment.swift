@@ -18,6 +18,7 @@ final class AppEnvironment {
     private var pollingTask: Task<Void, Never>?
 
     init() {
+        EnvLoader.loadIfNeeded()
         let s = AppSettings()
         settings = s
         pollingService = PollingService(settings: s)
