@@ -22,8 +22,7 @@ struct PopoverRootView: View {
             Divider().opacity(0.4)
             footer
         }
-        .frame(width: 380)
-        .frame(maxHeight: 600)
+        .frame(width: 420, height: 700)
         .animation(.easeInOut(duration: 0.2), value: showSettings)
         .onChange(of: appEnv.isLoading) { _, loading in
             if loading {
@@ -92,6 +91,16 @@ struct PopoverRootView: View {
                         .foregroundStyle(.tertiary)
                         .contentTransition(.numericText())
                 }
+
+                Button { TerminalLauncher.openSSH(settings: appEnv.settings) } label: {
+                    Image(systemName: "terminal.fill")
+                        .font(.callout)
+                        .fontWeight(.medium)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Open SSH session in Terminal")
+                .disabled(appEnv.settings.sshHost.isEmpty)
 
                 Button { appEnv.refreshNow() } label: {
                     Image(systemName: "arrow.clockwise")
