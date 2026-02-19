@@ -4,14 +4,10 @@ struct GaugeBar: View {
     let value: Double // 0.0–1.0
     @State private var animatedValue: Double = 0
 
-    private var gradient: LinearGradient {
-        if value >= 0.85 {
-            return LinearGradient(colors: [.orange, .red], startPoint: .leading, endPoint: .trailing)
-        }
-        if value >= 0.60 {
-            return LinearGradient(colors: [.yellow, .orange], startPoint: .leading, endPoint: .trailing)
-        }
-        return LinearGradient(colors: [.green, .mint], startPoint: .leading, endPoint: .trailing)
+    private var fillColor: Color {
+        if value >= 0.85 { return .red }
+        if value >= 0.60 { return .orange }
+        return .green
     }
 
     var body: some View {
@@ -20,11 +16,12 @@ struct GaugeBar: View {
                 Capsule()
                     .fill(.quaternary)
                 Capsule()
-                    .fill(gradient)
+                    .fill(fillColor)
                     .frame(width: max(0, geo.size.width * min(animatedValue, 1)))
+                    .shadow(color: fillColor.opacity(0.35), radius: 4, y: 0)
             }
         }
-        .frame(height: 6)
+        .frame(height: 8)
         .clipShape(Capsule())
         .onChange(of: value, initial: true) { _, v in
             withAnimation(.spring(response: 0.8, dampingFraction: 0.75)) {
