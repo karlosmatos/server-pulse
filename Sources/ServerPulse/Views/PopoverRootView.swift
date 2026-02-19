@@ -11,125 +11,91 @@ struct PopoverRootView: View {
             Divider().opacity(0.4)
 
             if showSettings {
-                SettingsView(isPresented: $showSettings)
-                    .environment(appEnv)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                SettingsView(isPresented: $showSettings).environment(appEnv)
             } else {
                 mainContent
-                    .transition(.move(edge: .leading).combined(with: .opacity))
             }
 
             Divider().opacity(0.4)
             footer
         }
-        .frame(width: 380)
-        .frame(maxHeight: 600)
-        .animation(.easeInOut(duration: 0.2), value: showSettings)
-        .onChange(of: appEnv.isLoading) { _, loading in
-            if loading {
-                withAnimation(.linear(duration: 0.8).repeatForever(autoreverses: false)) {
-                    spinning = true
-                }
-            } else {
-                spinning = false
-            }
-        }
+        .frame(width: 420, height: 700)
+        .onChange(of: appEnv.isLoading) { _, val in spinning = val }
     }
 
-    // MARK: - Main Content
+    // MARK: - Sections
 
     private var mainContent: some View {
         ScrollView {
             VStack(spacing: 10) {
                 ServerHeaderView()
                 GaugesView()
-
-                if !appEnv.processes.isEmpty {
-                    ProcessListView()
-                }
-
-                if !appEnv.workflows.isEmpty || !appEnv.recentExecutions.isEmpty {
-                    N8NView()
-                }
+                if !appEnv.processes.isEmpty { ProcessListView() }
+                if !appEnv.workflows.isEmpty || !appEnv.recentExecutions.isEmpty { N8NView() }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
         }
     }
 
-    // MARK: - Header
-
     private var header: some View {
         HStack(spacing: 8) {
             if showSettings {
-                Button {
-                    showSettings = false
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.callout)
-                        .fontWeight(.medium)
+                headerButton("chevron.left") {
+                    withAnimation(.easeInOut(duration: 0.2)) { showSettings = false }
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-
-                Text("Settings")
-                    .font(.headline)
+                Text("Settings").font(.headline)
             } else {
-                Image(systemName: "server.rack")
-                    .foregroundStyle(.blue)
-                    .font(.callout)
-                    .fontWeight(.medium)
-                Text("ServerPulse")
-                    .font(.headline)
+                Image(systemName: "server.rack").foregroundStyle(.blue).font(.callout).fontWeight(.medium)
+                Text("ServerPulse").font(.headline)
             }
 
             Spacer()
 
             if !showSettings {
                 if let t = appEnv.lastUpdated, !appEnv.isLoading {
-                    Text(t, style: .relative)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                    Text(t, style: .relative).font(.caption2).foregroundStyle(.tertiary)
                         .contentTransition(.numericText())
                 }
+                headerButton("terminal.fill") { TerminalLauncher.openSSH(settings: appEnv.settings) }
+                    .help("Open SSH session in Terminal")
+                    .disabled(appEnv.settings.sshHost.isEmpty)
 
                 Button { appEnv.refreshNow() } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.callout)
-                        .fontWeight(.medium)
+                    Image(systemName: "arrow.clockwise").font(.callout).fontWeight(.medium)
                         .rotationEffect(.degrees(spinning ? 360 : 0))
+                        .animation(spinning ? .linear(duration: 0.8).repeatForever(autoreverses: false) : .default, value: spinning)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+                .buttonStyle(.plain).foregroundStyle(.secondary)
             }
 
-            Button { showSettings.toggle() } label: {
-                Image(systemName: showSettings ? "xmark" : "gearshape")
-                    .font(.callout)
-                    .fontWeight(.medium)
+            headerButton(showSettings ? "xmark" : "gearshape") {
+                withAnimation(.easeInOut(duration: 0.2)) { showSettings.toggle() }
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
     }
 
-    // MARK: - Footer
-
     private var footer: some View {
         HStack {
             Spacer()
-            Button {
-                NSApplication.shared.terminate(nil)
-            } label: {
-                Text("Quit ServerPulse")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+            Button { NSApplication.shared.terminate(nil) } label: {
+                Text("Quit ServerPulse").font(.caption).foregroundStyle(.tertiary)
             }
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+    }
+
+    // MARK: - Helpers
+
+    private func headerButton(_ icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon).font(.callout).fontWeight(.medium)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
     }
 }

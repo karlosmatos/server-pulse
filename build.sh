@@ -15,6 +15,7 @@ mkdir -p "$CONTENTS/Resources"
 
 cp "$BINARY" "$CONTENTS/MacOS/ServerPulse"
 cp "Resources/Info.plist" "$CONTENTS/Info.plist"
+cp "Resources/AppIcon.icns" "$CONTENTS/Resources/AppIcon.icns"
 
 echo "Code signing..."
 codesign --force --deep --sign "-" \

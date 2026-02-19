@@ -8,6 +8,7 @@ A macOS menu bar app that monitors a Linux VPS — showing CPU/RAM/disk gauges, 
 - **Live server stats**: CPU, RAM, disk usage with animated gauges
 - **Python processes**: lists running scrapers with PID, CPU%, and MEM%
 - **n8n workflows**: active/inactive status and recent execution history
+- **One-click SSH**: open a Terminal session to your server straight from the menu bar
 - **Notifications**: alerts when server goes offline or a Python process stops
 
 ## Requirements

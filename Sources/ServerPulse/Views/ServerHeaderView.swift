@@ -3,58 +3,52 @@ import SwiftUI
 struct ServerHeaderView: View {
     @Environment(AppEnvironment.self) private var appEnv
 
+    private var status: ServerStatus { appEnv.serverStatus }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                PulsingDot(
-                    color: appEnv.serverStatus.color,
-                    isActive: appEnv.serverStatus == .online
-                )
+                PulsingDot(color: status.color, isActive: status == .online)
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(appEnv.settings.sshHost.isEmpty ? "Not configured" : appEnv.settings.sshHost)
-                        .font(.title3)
-                        .fontWeight(.semibold)
-                        .fontDesign(.rounded)
+                        .font(.title2).fontWeight(.bold).fontDesign(.rounded)
 
-                    HStack(spacing: 4) {
-                        Text(appEnv.serverStatus.label)
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .foregroundStyle(appEnv.serverStatus.color)
+                    HStack(spacing: 6) {
+                        Text(status.label)
+                            .font(.caption).fontWeight(.semibold)
+                            .foregroundStyle(status.color)
+                            .padding(.horizontal, 8).padding(.vertical, 2)
+                            .background(status.color.opacity(0.15), in: Capsule())
+
                         if let stats = appEnv.stats {
-                            Text("·")
-                                .foregroundStyle(.tertiary)
-                            Image(systemName: "clock")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                            Text(stats.uptime)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            Image(systemName: "clock").font(.caption2).foregroundStyle(.tertiary)
+                            Text(stats.uptime).font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }
-
                 Spacer()
             }
 
             if let err = appEnv.errorMessage {
                 HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                    Text(err)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Image(systemName: "exclamationmark.triangle.fill").font(.caption2).foregroundStyle(.orange)
+                    Text(err).font(.caption).foregroundStyle(.secondary)
                     Spacer()
                 }
                 .padding(.top, 8)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 12)
+        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .animation(.easeInOut(duration: 0.3), value: appEnv.serverStatus.label)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.quaternary.opacity(0.5))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(status.color.opacity(0.06))
+                }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
