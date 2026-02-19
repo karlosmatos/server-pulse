@@ -1,6 +1,7 @@
 .DS_Store
 .build/
 build/
+.env
 *.o
 *.d
 Package.resolved

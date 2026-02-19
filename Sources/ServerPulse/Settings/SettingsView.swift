@@ -2,7 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(AppEnvironment.self) private var appEnv
-    @Environment(\.dismiss) private var dismiss
+    @Binding var isPresented: Bool
 
     @State private var sshHost      = ""
     @State private var sshUser      = ""
@@ -13,78 +13,61 @@ struct SettingsView: View {
     @State private var pollInterval = 30.0
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Title bar
-            HStack {
-                Image(systemName: "gearshape.fill")
-                    .foregroundStyle(.secondary)
-                Text("Settings")
-                    .font(.headline)
-                Spacer()
-                Button("Done") {
-                    save()
-                    dismiss()
-                }
-                .keyboardShortcut(.return, modifiers: [])
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-            }
-            .padding()
-
-            Divider()
-
-            Form {
-                Section {
-                    LabeledContent("Host") {
-                        TextField("IP or hostname", text: $sshHost)
-                            .textFieldStyle(.roundedBorder)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                // SSH
+                SectionCard(icon: "lock.shield", title: "SSH Connection", tint: .blue) {
+                    VStack(spacing: 10) {
+                        SettingsField(label: "Host", text: $sshHost, placeholder: "IP or hostname")
+                        SettingsField(label: "User", text: $sshUser, placeholder: "root")
+                        SettingsField(label: "Port", text: $sshPort, placeholder: "22")
+                        SettingsField(label: "SSH Key", text: $sshKeyPath, placeholder: "~/.ssh/id_ed25519")
                     }
-                    LabeledContent("User") {
-                        TextField("root", text: $sshUser)
-                            .textFieldStyle(.roundedBorder)
-                    }
-                    LabeledContent("Port") {
-                        TextField("22", text: $sshPort)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 80)
-                    }
-                    LabeledContent("SSH Key") {
-                        TextField("~/.ssh/id_ed25519", text: $sshKeyPath)
-                            .textFieldStyle(.roundedBorder)
-                    }
-                } header: {
-                    Label("SSH Connection", systemImage: "lock.shield")
                 }
 
-                Section {
-                    LabeledContent("Base URL") {
-                        TextField("http://host:5678", text: $n8nBaseURL)
-                            .textFieldStyle(.roundedBorder)
-                    }
-                    LabeledContent("API Key") {
-                        SecureField("Paste n8n API key", text: $n8nAPIKey)
-                            .textFieldStyle(.roundedBorder)
-                    }
-                } header: {
-                    Label("n8n API", systemImage: "flowchart")
-                }
-
-                Section {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Slider(value: $pollInterval, in: 10...300, step: 5) {
-                            Text("Poll interval")
+                // n8n
+                SectionCard(icon: "flowchart", title: "n8n API", tint: .orange) {
+                    VStack(spacing: 10) {
+                        SettingsField(label: "Base URL", text: $n8nBaseURL, placeholder: "http://host:5678")
+                        HStack(spacing: 8) {
+                            Text("API Key")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 56, alignment: .trailing)
+                            SecureField("Paste n8n API key", text: $n8nAPIKey)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.caption)
                         }
+                    }
+                }
+
+                // Polling
+                SectionCard(icon: "clock.arrow.2.circlepath", title: "Polling", tint: .green) {
+                    VStack(spacing: 6) {
+                        Slider(value: $pollInterval, in: 10...300, step: 5)
                         Text("Every \(Int(pollInterval)) seconds")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
                     }
-                } header: {
-                    Label("Polling", systemImage: "clock.arrow.2.circlepath")
                 }
+
+                // Save button
+                Button {
+                    save()
+                    isPresented = false
+                } label: {
+                    Text("Save")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                }
+                .buttonStyle(.borderedProminent)
             }
-            .formStyle(.grouped)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
         }
-        .frame(width: 420, height: 480)
         .onAppear(perform: load)
     }
 
@@ -109,5 +92,23 @@ struct SettingsView: View {
         s.n8nAPIKey       = n8nAPIKey
         s.pollingInterval = pollInterval
         appEnv.startPolling()
+    }
+}
+
+private struct SettingsField: View {
+    let label: String
+    @Binding var text: String
+    var placeholder: String = ""
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 56, alignment: .trailing)
+            TextField(placeholder, text: $text)
+                .textFieldStyle(.roundedBorder)
+                .font(.caption)
+        }
     }
 }
