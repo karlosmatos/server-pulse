@@ -3,8 +3,14 @@ import SwiftUI
 struct ProcessListView: View {
     @Environment(AppEnvironment.self) private var appEnv
 
+    private var title: String {
+        let filter = (appEnv.selectedServer?.processFilter ?? "").trimmingCharacters(in: .whitespaces)
+        let label = filter.isEmpty ? "Top Processes" : "\(filter.capitalized) Processes"
+        return "\(label) (\(appEnv.processes.count))"
+    }
+
     var body: some View {
-        SectionCard(icon: "terminal", title: "Python Processes (\(appEnv.processes.count))", tint: .purple) {
+        SectionCard(icon: "terminal", title: title, tint: .purple) {
             VStack(spacing: 6) {
                 ForEach(appEnv.processes) { proc in
                     ProcessRow(proc: proc)
@@ -40,7 +46,7 @@ private struct ProcessRow: View {
     }
 }
 
-private struct StatChip: View {
+struct StatChip: View {
     let label: String
     let value: Double
     let warn: Bool

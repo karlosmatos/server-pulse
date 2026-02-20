@@ -2,8 +2,15 @@ import Foundation
 import UserNotifications
 
 actor NotificationManager {
+    private let serverName: String
+    private let serverID: UUID
     private var previousStatus: ServerStatus = .unknown
     private var previousPIDs: Set<Int> = []
+
+    init(serverName: String, serverID: UUID) {
+        self.serverName = serverName
+        self.serverID = serverID
+    }
 
     func requestPermission() async {
         _ = try? await UNUserNotificationCenter.current()
@@ -13,22 +20,22 @@ actor NotificationManager {
     func evaluate(result: PollResult) async {
         // Server state transitions
         if previousStatus == .online && result.status == .offline {
-            await post(title: "Server Offline",
-                       body: "Your server is no longer reachable",
-                       id: "server.offline")
+            await post(title: "\(serverName) Offline",
+                       body: "\(serverName) is no longer reachable",
+                       id: "server.offline.\(serverID)")
         } else if previousStatus == .offline && result.status == .online {
-            await post(title: "Server Back Online",
-                       body: "Your server is reachable again",
-                       id: "server.online")
+            await post(title: "\(serverName) Back Online",
+                       body: "\(serverName) is reachable again",
+                       id: "server.online.\(serverID)")
         }
 
-        // Detect stopped Python processes
+        // Detect stopped monitored processes
         let currentPIDs = Set(result.processes.map(\.id))
         let stopped = previousPIDs.subtracting(currentPIDs)
         if !stopped.isEmpty && !previousPIDs.isEmpty {
-            await post(title: "Process Stopped",
-                       body: "\(stopped.count) Python process(es) stopped running",
-                       id: "process.stopped")
+            await post(title: "\(serverName): Process Stopped",
+                       body: "\(stopped.count) monitored process(es) stopped running",
+                       id: "process.stopped.\(serverID)")
         }
 
         previousStatus = result.status

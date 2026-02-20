@@ -9,7 +9,7 @@ struct ServerPulseApp: App {
             PopoverRootView()
                 .environment(appEnv)
         } label: {
-            MenuBarLabel(status: appEnv.serverStatus)
+            MenuBarLabel(status: appEnv.worstStatus)
         }
         .menuBarExtraStyle(.window)
     }

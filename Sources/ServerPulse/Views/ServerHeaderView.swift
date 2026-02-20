@@ -11,7 +11,7 @@ struct ServerHeaderView: View {
                 PulsingDot(color: status.color, isActive: status == .online)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(appEnv.settings.sshHost.isEmpty ? "Not configured" : appEnv.settings.sshHost)
+                    Text(appEnv.selectedServer?.name ?? "Not configured")
                         .font(.title2).fontWeight(.bold).fontDesign(.rounded)
 
                     HStack(spacing: 6) {
@@ -20,6 +20,10 @@ struct ServerHeaderView: View {
                             .foregroundStyle(status.color)
                             .padding(.horizontal, 8).padding(.vertical, 2)
                             .background(status.color.opacity(0.15), in: Capsule())
+
+                        if let host = appEnv.selectedServer?.sshHost, !host.isEmpty {
+                            Text(host).font(.caption).foregroundStyle(.secondary)
+                        }
 
                         if let stats = appEnv.stats {
                             Image(systemName: "clock").font(.caption2).foregroundStyle(.tertiary)

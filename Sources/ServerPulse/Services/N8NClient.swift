@@ -15,16 +15,16 @@ enum N8NError: Error, LocalizedError {
 }
 
 struct N8NClient {
-    let settings: AppSettings
+    let config: ServerConfig
 
     func fetchWorkflows() async throws -> [N8NWorkflow] {
-        guard !settings.n8nAPIKey.isEmpty else { throw N8NError.missingAPIKey }
+        guard !config.n8nAPIKey.isEmpty else { throw N8NError.missingAPIKey }
         let data = try await get("/api/v1/workflows?limit=50")
         return try decode(N8NWorkflowsResponse.self, from: data).data
     }
 
     func fetchRecentExecutions(limit: Int = 20) async throws -> [N8NExecution] {
-        guard !settings.n8nAPIKey.isEmpty else { throw N8NError.missingAPIKey }
+        guard !config.n8nAPIKey.isEmpty else { throw N8NError.missingAPIKey }
         let data = try await get("/api/v1/executions?limit=\(limit)&includeData=false")
         return try decode(N8NExecutionsResponse.self, from: data).data
     }
@@ -32,11 +32,11 @@ struct N8NClient {
     // MARK: - Private helpers
 
     private func get(_ path: String) async throws -> Data {
-        let base = settings.n8nBaseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let base = config.n8nBaseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard let url = URL(string: base + path) else { throw N8NError.invalidURL }
 
         var request = URLRequest(url: url, timeoutInterval: 10)
-        request.setValue(settings.n8nAPIKey, forHTTPHeaderField: "X-N8N-API-KEY")
+        request.setValue(config.n8nAPIKey, forHTTPHeaderField: "X-N8N-API-KEY")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
 
         let (data, response) = try await URLSession.shared.data(for: request)

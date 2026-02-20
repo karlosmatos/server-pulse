@@ -15,24 +15,24 @@ enum SSHError: Error, LocalizedError {
 }
 
 struct SSHClient {
-    let settings: AppSettings
+    let config: ServerConfig
 
     func run(_ command: String) async throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
 
         var args = [
-            "-i", settings.resolvedKeyPath,
+            "-i", config.resolvedKeyPath,
             "-o", "BatchMode=yes",
             "-o", "StrictHostKeyChecking=no",
             "-o", "ConnectTimeout=10",
             "-o", "ServerAliveInterval=5",
             "-o", "ServerAliveCountMax=1",
         ]
-        if settings.sshPort != 22 {
-            args += ["-p", String(settings.sshPort)]
+        if config.sshPort != 22 {
+            args += ["-p", String(config.sshPort)]
         }
-        args += ["\(settings.sshUser)@\(settings.sshHost)", command]
+        args += ["\(config.sshUser)@\(config.sshHost)", command]
         process.arguments = args
 
         let stdout = Pipe()

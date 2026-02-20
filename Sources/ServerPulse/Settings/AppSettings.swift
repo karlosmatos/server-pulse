@@ -12,31 +12,39 @@ struct UserDefault<T> {
 }
 
 final class AppSettings: @unchecked Sendable {
-    @UserDefault(key: "ssh.host",      defaultValue: "")
-    var sshHost: String
+    // Global (not per-server)
+    @UserDefault(key: "terminal.app", defaultValue: "terminal")
+    var terminalApp: String
 
-    @UserDefault(key: "ssh.user",      defaultValue: "")
-    var sshUser: String
+    // MARK: - Server list (JSON in UserDefaults)
 
-    @UserDefault(key: "ssh.keyPath",   defaultValue: "")
-    var sshKeyPath: String
-
-    @UserDefault(key: "ssh.port",      defaultValue: 22)
-    var sshPort: Int
-
-    @UserDefault(key: "n8n.baseURL",   defaultValue: "")
-    var n8nBaseURL: String
-
-    @UserDefault(key: "n8n.apiKey",    defaultValue: "")
-    var n8nAPIKey: String
-
-    @UserDefault(key: "poll.interval", defaultValue: 30.0)
-    var pollingInterval: Double
-
-    var resolvedKeyPath: String {
-        let path = sshKeyPath.isEmpty ? "~/.ssh/id_ed25519" : sshKeyPath
-        return path.hasPrefix("~")
-            ? (path as NSString).expandingTildeInPath
-            : path
+    var servers: [ServerConfig] {
+        get {
+            guard let data = UserDefaults.standard.data(forKey: "servers.list") else { return [] }
+            return (try? JSONDecoder().decode([ServerConfig].self, from: data)) ?? []
+        }
+        set {
+            let data = try? JSONEncoder().encode(newValue)
+            UserDefaults.standard.set(data, forKey: "servers.list")
+        }
     }
+
+    var selectedServerID: UUID? {
+        get {
+            guard let str = UserDefaults.standard.string(forKey: "servers.selectedID") else { return nil }
+            return UUID(uuidString: str)
+        }
+        set {
+            UserDefaults.standard.set(newValue?.uuidString, forKey: "servers.selectedID")
+        }
+    }
+
+    // MARK: - Legacy keys (for migration)
+
+    static let legacyKeys = [
+        "ssh.host", "ssh.user", "ssh.keyPath", "ssh.port",
+        "n8n.baseURL", "n8n.apiKey",
+        "poll.interval", "process.count", "process.filter",
+        "docker.enabled", "systemd.services",
+    ]
 }
