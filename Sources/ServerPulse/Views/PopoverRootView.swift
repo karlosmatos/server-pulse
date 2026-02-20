@@ -104,7 +104,10 @@ struct PopoverRootView: View {
                     }
                 }
                 .help("Open SSH session in Terminal")
-                .disabled(appEnv.selectedServer?.sshHost.isEmpty ?? true)
+                .disabled({
+                    guard let s = appEnv.selectedServer else { return true }
+                    return s.sshHost.isEmpty || s.sshUser.isEmpty
+                }())
 
                 Button { appEnv.refreshNow() } label: {
                     Image(systemName: "arrow.clockwise").font(.callout).fontWeight(.medium)
