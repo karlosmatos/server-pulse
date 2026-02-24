@@ -7,19 +7,30 @@ struct ServerProcess: Identifiable {
     let memPercent: Double
     let command: String
 
-    var displayName: String {
-        let parts = command.components(separatedBy: " ")
-        guard let idx = parts.firstIndex(where: { $0.lowercased().contains("python") }) else {
-            return parts.last ?? command
-        }
-        let next = idx + 1
-        guard next < parts.count else { return "python" }
+    private static let interpreters: Set<String> = ["python", "python3", "node", "ruby", "perl", "java", "php"]
 
-        if parts[next] == "-m", next + 1 < parts.count {
-            let module = parts[next + 1]
-            let hasAppArg = next + 2 < parts.count && ["uvicorn", "gunicorn", "celery"].contains(module)
-            return hasAppArg ? "\(module) \(parts[next + 2])" : module
+    var displayName: String {
+        let parts = command.components(separatedBy: " ").filter { !$0.isEmpty }
+        guard let first = parts.first else { return command }
+
+        let binary = (first as NSString).lastPathComponent.lowercased()
+
+        // For interpreters, show binary + script/module argument
+        if Self.interpreters.contains(binary) {
+            let next = 1
+            guard next < parts.count else { return binary }
+
+            // Handle python -m module
+            if parts[next] == "-m", next + 1 < parts.count {
+                return parts[next + 1]
+            }
+            // Skip flags (start with -)
+            if let argIdx = parts.dropFirst().firstIndex(where: { !$0.hasPrefix("-") }) {
+                return (parts[argIdx] as NSString).lastPathComponent
+            }
+            return binary
         }
-        return (parts[next] as NSString).lastPathComponent
+
+        return (first as NSString).lastPathComponent
     }
 }

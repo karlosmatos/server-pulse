@@ -4,17 +4,14 @@ struct N8NView: View {
     @Environment(AppEnvironment.self) private var appEnv
     @State private var expanded = false
 
-    private var workflows: [N8NWorkflow] { appEnv.workflows }
-    private var limit: Int { 5 }
-
     var body: some View {
         SectionCard(icon: "flowchart", title: "n8n", tint: .orange) {
             HStack(spacing: 6) {
-                CountBadge(count: workflows.filter(\.active).count, color: .green)
-                CountBadge(count: workflows.filter { !$0.active }.count, color: .gray)
+                CountBadge(count: appEnv.workflows.filter(\.active).count, color: .green)
+                CountBadge(count: appEnv.workflows.filter { !$0.active }.count, color: .gray)
             }
         } content: {
-            if workflows.isEmpty && appEnv.recentExecutions.isEmpty {
+            if appEnv.workflows.isEmpty && appEnv.recentExecutions.isEmpty {
                 emptyState
             } else {
                 VStack(alignment: .leading, spacing: 8) {
@@ -35,18 +32,18 @@ struct N8NView: View {
 
     @ViewBuilder
     private var workflowSection: some View {
-        if !workflows.isEmpty {
-            let visible = expanded ? workflows : Array(workflows.prefix(limit))
+        if !appEnv.workflows.isEmpty {
+            let visible = expanded ? appEnv.workflows : Array(appEnv.workflows.prefix(5))
             ForEach(visible) { wf in WorkflowRow(workflow: wf) }
 
-            if workflows.count > limit {
+            if appEnv.workflows.count > 5 {
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() }
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: expanded ? "chevron.up" : "chevron.down")
                             .font(.system(size: 8, weight: .semibold))
-                        Text(expanded ? "Show less" : "\(workflows.count - limit) more workflows…")
+                        Text(expanded ? "Show less" : "\(appEnv.workflows.count - 5) more workflows…")
                     }
                     .font(.caption).foregroundStyle(.orange)
                 }
@@ -71,17 +68,6 @@ struct N8NView: View {
 }
 
 // MARK: - Subviews
-
-private struct CountBadge: View {
-    let count: Int
-    let color: Color
-    var body: some View {
-        HStack(spacing: 3) {
-            Circle().fill(color).frame(width: 5, height: 5)
-            Text("\(count)").font(.system(size: 10, weight: .medium)).monospacedDigit().foregroundStyle(.secondary)
-        }
-    }
-}
 
 private struct WorkflowRow: View {
     let workflow: N8NWorkflow

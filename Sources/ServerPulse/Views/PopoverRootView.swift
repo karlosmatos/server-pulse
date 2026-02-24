@@ -3,7 +3,6 @@ import SwiftUI
 struct PopoverRootView: View {
     @Environment(AppEnvironment.self) private var appEnv
     @State private var showSettings = false
-    @State private var spinning = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -20,7 +19,6 @@ struct PopoverRootView: View {
             footer
         }
         .frame(width: 420, height: 700)
-        .onChange(of: appEnv.isLoading) { _, val in spinning = val }
     }
 
     // MARK: - Sections
@@ -28,13 +26,54 @@ struct PopoverRootView: View {
     private var mainContent: some View {
         ScrollView {
             VStack(spacing: 10) {
+                if appEnv.settings.servers.count > 1 {
+                    serverPicker
+                }
                 ServerHeaderView()
                 GaugesView()
                 if !appEnv.processes.isEmpty { ProcessListView() }
+                if !appEnv.dockerContainers.isEmpty { DockerView() }
+                if !appEnv.systemdServices.isEmpty { SystemdServicesView() }
                 if !appEnv.workflows.isEmpty || !appEnv.recentExecutions.isEmpty { N8NView() }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
+        }
+    }
+
+    private var serverPicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(appEnv.settings.servers) { server in
+                    let isSelected = server.id == appEnv.selectedServerID
+                    let state = appEnv.serverStates[server.id]
+
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            appEnv.selectedServerID = server.id
+                        }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Circle()
+                                .fill((state?.status ?? .unknown).color)
+                                .frame(width: 6, height: 6)
+                            Text(server.name)
+                                .font(.caption)
+                                .fontWeight(isSelected ? .semibold : .regular)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            isSelected ? Color.accentColor.opacity(0.15) : Color.secondary.opacity(0.08),
+                            in: Capsule()
+                        )
+                        .overlay(
+                            Capsule().strokeBorder(isSelected ? Color.accentColor.opacity(0.4) : .clear, lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
     }
 
@@ -54,19 +93,24 @@ struct PopoverRootView: View {
 
             if !showSettings {
                 if let t = appEnv.lastUpdated, !appEnv.isLoading {
-                    Text(t, style: .relative).font(.caption2).foregroundStyle(.tertiary)
-                        .contentTransition(.numericText())
+                    Text(t, format: .dateTime.hour().minute()).font(.caption2).foregroundStyle(.tertiary)
                 }
-                headerButton("terminal.fill") { TerminalLauncher.openSSH(settings: appEnv.settings) }
-                    .help("Open SSH session in Terminal")
-                    .disabled(appEnv.settings.sshHost.isEmpty)
+                headerButton("terminal.fill") {
+                    if let config = appEnv.selectedServer {
+                        TerminalLauncher.openSSH(config: config, terminalApp: appEnv.settings.terminalApp)
+                    }
+                }
+                .help("Open SSH session in Terminal")
+                .disabled(appEnv.selectedServer.map { $0.sshHost.isEmpty || $0.sshUser.isEmpty } ?? true)
 
-                Button { appEnv.refreshNow() } label: {
-                    Image(systemName: "arrow.clockwise").font(.callout).fontWeight(.medium)
-                        .rotationEffect(.degrees(spinning ? 360 : 0))
-                        .animation(spinning ? .linear(duration: 0.8).repeatForever(autoreverses: false) : .default, value: spinning)
+                if appEnv.isLoading {
+                    ProgressView().controlSize(.small).frame(width: 20)
+                } else {
+                    Button { appEnv.refreshNow() } label: {
+                        Image(systemName: "arrow.clockwise").font(.callout).fontWeight(.medium)
+                    }
+                    .buttonStyle(.plain).foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain).foregroundStyle(.secondary)
             }
 
             headerButton(showSettings ? "xmark" : "gearshape") {

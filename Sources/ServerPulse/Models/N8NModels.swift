@@ -6,17 +6,11 @@ struct N8NWorkflow: Identifiable, Decodable {
     let active: Bool
     let updatedAt: Date?
 
-    enum CodingKeys: String, CodingKey {
-        case id, name, active, updatedAt
-    }
+    enum CodingKeys: String, CodingKey { case id, name, active, updatedAt }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        if let s = try? c.decode(String.self, forKey: .id) {
-            id = s
-        } else {
-            id = String(try c.decode(Int.self, forKey: .id))
-        }
+        id = try (try? c.decode(String.self, forKey: .id)) ?? String(c.decode(Int.self, forKey: .id))
         name = try c.decode(String.self, forKey: .name)
         active = try c.decode(Bool.self, forKey: .active)
         updatedAt = try? c.decode(Date.self, forKey: .updatedAt)
@@ -34,16 +28,11 @@ struct N8NExecution: Identifiable, Decodable {
     enum CodingKeys: String, CodingKey {
         case id, workflowId, status, startedAt, stoppedAt, workflowData
     }
-
     private enum WorkflowDataKeys: String, CodingKey { case name }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        if let s = try? c.decode(String.self, forKey: .id) {
-            id = s
-        } else {
-            id = String(try c.decode(Int.self, forKey: .id))
-        }
+        id = try (try? c.decode(String.self, forKey: .id)) ?? String(c.decode(Int.self, forKey: .id))
         workflowId = try? c.decode(String.self, forKey: .workflowId)
         status = (try? c.decode(String.self, forKey: .status)) ?? "unknown"
         startedAt = try? c.decode(Date.self, forKey: .startedAt)
