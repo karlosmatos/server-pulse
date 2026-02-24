@@ -3,7 +3,6 @@ import SwiftUI
 struct PopoverRootView: View {
     @Environment(AppEnvironment.self) private var appEnv
     @State private var showSettings = false
-    @State private var spinning = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -20,7 +19,6 @@ struct PopoverRootView: View {
             footer
         }
         .frame(width: 420, height: 700)
-        .onChange(of: appEnv.isLoading) { _, val in spinning = val }
     }
 
     // MARK: - Sections
@@ -95,8 +93,7 @@ struct PopoverRootView: View {
 
             if !showSettings {
                 if let t = appEnv.lastUpdated, !appEnv.isLoading {
-                    Text(t, style: .relative).font(.caption2).foregroundStyle(.tertiary)
-                        .contentTransition(.numericText())
+                    Text(t, format: .dateTime.hour().minute()).font(.caption2).foregroundStyle(.tertiary)
                 }
                 headerButton("terminal.fill") {
                     if let config = appEnv.selectedServer {
@@ -104,17 +101,16 @@ struct PopoverRootView: View {
                     }
                 }
                 .help("Open SSH session in Terminal")
-                .disabled({
-                    guard let s = appEnv.selectedServer else { return true }
-                    return s.sshHost.isEmpty || s.sshUser.isEmpty
-                }())
+                .disabled(appEnv.selectedServer.map { $0.sshHost.isEmpty || $0.sshUser.isEmpty } ?? true)
 
-                Button { appEnv.refreshNow() } label: {
-                    Image(systemName: "arrow.clockwise").font(.callout).fontWeight(.medium)
-                        .rotationEffect(.degrees(spinning ? 360 : 0))
-                        .animation(spinning ? .linear(duration: 0.8).repeatForever(autoreverses: false) : .default, value: spinning)
+                if appEnv.isLoading {
+                    ProgressView().controlSize(.small).frame(width: 20)
+                } else {
+                    Button { appEnv.refreshNow() } label: {
+                        Image(systemName: "arrow.clockwise").font(.callout).fontWeight(.medium)
+                    }
+                    .buttonStyle(.plain).foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain).foregroundStyle(.secondary)
             }
 
             headerButton(showSettings ? "xmark" : "gearshape") {

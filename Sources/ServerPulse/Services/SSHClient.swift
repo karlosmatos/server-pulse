@@ -24,10 +24,16 @@ struct SSHClient {
         var args = [
             "-i", config.resolvedKeyPath,
             "-o", "BatchMode=yes",
-            "-o", "StrictHostKeyChecking=no",
+            "-o", "StrictHostKeyChecking=accept-new",
             "-o", "ConnectTimeout=10",
-            "-o", "ServerAliveInterval=5",
-            "-o", "ServerAliveCountMax=1",
+            "-o", "ServerAliveInterval=30",
+            "-o", "ServerAliveCountMax=2",
+            // Multiplex all SSH commands over one TCP connection per server.
+            // This avoids a full crypto handshake for each of the 10 concurrent
+            // commands fired per poll, dramatically cutting CPU usage.
+            "-o", "ControlMaster=auto",
+            "-o", "ControlPath=~/.ssh/sp_ctl_%C",
+            "-o", "ControlPersist=120",
         ]
         if config.sshPort != 22 {
             args += ["-p", String(config.sshPort)]

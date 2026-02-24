@@ -6,10 +6,11 @@ struct SystemdServicesView: View {
     private var services: [SystemdService] { appEnv.systemdServices }
 
     var body: some View {
+        let activeCount = services.filter { $0.state == .active }.count
         SectionCard(icon: "gearshape.2", title: "Services", tint: .indigo) {
             HStack(spacing: 6) {
-                CountBadge(count: services.filter { $0.state == .active }.count, color: .green)
-                CountBadge(count: services.filter { $0.state != .active }.count, color: .gray)
+                CountBadge(count: activeCount, color: .green)
+                CountBadge(count: services.count - activeCount, color: .gray)
             }
         } content: {
             VStack(spacing: 6) {
