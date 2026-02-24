@@ -2,9 +2,9 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(AppEnvironment.self) private var appEnv
-    @Binding var isPresented: Bool
 
     @State private var editingServer: ServerConfig?
+    @State private var serverToDelete: ServerConfig?
     @State private var terminalApp = "terminal"
 
     var body: some View {
@@ -53,7 +53,7 @@ struct SettingsView: View {
                                 .buttonStyle(.plain)
 
                                 Button {
-                                    appEnv.removeServer(server.id)
+                                    serverToDelete = server
                                 } label: {
                                     Image(systemName: "trash")
                                         .font(.caption2).foregroundStyle(.red.opacity(0.7))
@@ -99,6 +99,17 @@ struct SettingsView: View {
         }
         .onAppear {
             terminalApp = appEnv.settings.terminalApp
+        }
+        .confirmationDialog(
+            "Remove \"\(serverToDelete?.name ?? "")\"?",
+            isPresented: Binding(get: { serverToDelete != nil }, set: { if !$0 { serverToDelete = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) {
+                if let id = serverToDelete?.id { appEnv.removeServer(id) }
+                serverToDelete = nil
+            }
+            Button("Cancel", role: .cancel) { serverToDelete = nil }
         }
     }
 }

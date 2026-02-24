@@ -11,7 +11,7 @@ struct PopoverRootView: View {
             Divider().opacity(0.4)
 
             if showSettings {
-                SettingsView(isPresented: $showSettings).environment(appEnv)
+                SettingsView().environment(appEnv)
             } else {
                 mainContent
             }
