@@ -23,8 +23,20 @@ final class AppSettings: @unchecked Sendable {
         get {
             guard let data = UserDefaults.standard.data(forKey: "servers.list") else { return [] }
             var configs = (try? JSONDecoder().decode([ServerConfig].self, from: data)) ?? []
+            var needsResave = false
             for i in configs.indices {
-                configs[i].n8nAPIKey = KeychainHelper.get(account: configs[i].id.uuidString) ?? ""
+                let keychainKey = KeychainHelper.get(account: configs[i].id.uuidString) ?? ""
+                if keychainKey.isEmpty && !configs[i].n8nAPIKey.isEmpty {
+                    // Legacy JSON had the key — migrate it to Keychain now.
+                    KeychainHelper.set(configs[i].n8nAPIKey, account: configs[i].id.uuidString)
+                    needsResave = true
+                } else {
+                    configs[i].n8nAPIKey = keychainKey
+                }
+            }
+            if needsResave,
+               let clean = try? JSONEncoder().encode(configs) {
+                UserDefaults.standard.set(clean, forKey: "servers.list")
             }
             return configs
         }
