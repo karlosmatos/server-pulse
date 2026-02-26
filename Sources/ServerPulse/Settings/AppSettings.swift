@@ -22,10 +22,20 @@ final class AppSettings: @unchecked Sendable {
     var servers: [ServerConfig] {
         get {
             guard let data = UserDefaults.standard.data(forKey: "servers.list") else { return [] }
-            return (try? JSONDecoder().decode([ServerConfig].self, from: data)) ?? []
+            var configs = (try? JSONDecoder().decode([ServerConfig].self, from: data)) ?? []
+            for i in configs.indices {
+                configs[i].n8nAPIKey = KeychainHelper.get(account: configs[i].id.uuidString) ?? ""
+            }
+            return configs
         }
         set {
-            let data = try? JSONEncoder().encode(newValue)
+            for server in newValue {
+                KeychainHelper.set(server.n8nAPIKey, account: server.id.uuidString)
+            }
+            guard let data = try? JSONEncoder().encode(newValue) else {
+                assertionFailure("Failed to encode servers list")
+                return
+            }
             UserDefaults.standard.set(data, forKey: "servers.list")
         }
     }

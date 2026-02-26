@@ -12,7 +12,8 @@ struct ServerConfig: Codable, Identifiable, Sendable {
 
     // n8n
     var n8nBaseURL: String
-    var n8nAPIKey: String
+    /// Not persisted via Codable — stored in Keychain keyed by `id`.
+    var n8nAPIKey: String = ""
 
     // Monitoring
     var pollingInterval: Double
@@ -20,6 +21,13 @@ struct ServerConfig: Codable, Identifiable, Sendable {
     var processFilter: String
     var dockerEnabled: Bool
     var systemdServices: String
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, sshHost, sshUser, sshKeyPath, sshPort
+        case n8nBaseURL, pollingInterval, processCount
+        case processFilter, dockerEnabled, systemdServices
+        // n8nAPIKey intentionally omitted — stored in Keychain
+    }
 
     var resolvedKeyPath: String {
         let path = sshKeyPath.isEmpty ? "~/.ssh/id_ed25519" : sshKeyPath

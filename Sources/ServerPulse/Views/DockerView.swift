@@ -46,7 +46,7 @@ private struct ContainerRow: View {
                     StatChip(label: "MEM", value: container.memPercent, warn: container.memPercent > 70)
                 }
             } else {
-                Text(container.status.capitalized)
+                Text(container.status.components(separatedBy: " ").first?.capitalized ?? "Unknown")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.gray)
                     .padding(.horizontal, 6).padding(.vertical, 2)

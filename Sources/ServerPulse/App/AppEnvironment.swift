@@ -123,8 +123,10 @@ final class AppEnvironment {
             await service.notifications.requestPermission()
             while !Task.isCancelled {
                 await self?.refreshServer(id: id, config: config)
-                let interval = config.pollingInterval
-                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+                let rawInterval = config.pollingInterval
+                let interval = (rawInterval.isFinite && rawInterval > 0) ? rawInterval : 30.0
+                let nanos = min(interval * 1_000_000_000, Double(UInt64.max))
+                try? await Task.sleep(nanoseconds: UInt64(nanos))
             }
         }
     }
@@ -144,6 +146,8 @@ final class AppEnvironment {
         serverStates[id]?.isLoading = true
 
         let result = await service.poll()
+
+        guard !Task.isCancelled, pollingServices[id] != nil else { return }
 
         var state = serverStates[id] ?? ServerState()
         state.status = result.status

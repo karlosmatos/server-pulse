@@ -8,9 +8,9 @@ enum EnvLoader {
         let ud = UserDefaults.standard
         let host = ud.string(forKey: "ssh.host") ?? ""
         let user = ud.string(forKey: "ssh.user") ?? ""
-        guard !host.isEmpty || !user.isEmpty else {
-            // Nothing to migrate — clean up just in case
-            cleanLegacyKeys()
+        guard !host.isEmpty else {
+            // Nothing useful to migrate — clean up just in case
+            if !user.isEmpty { cleanLegacyKeys() }
             return nil
         }
 
