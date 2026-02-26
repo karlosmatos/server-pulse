@@ -33,35 +33,53 @@ struct SettingsView: View {
                 SectionCard(icon: "server.rack", title: "Servers", tint: .blue) {
                     VStack(spacing: 6) {
                         ForEach(appEnv.settings.servers) { server in
-                            HStack(spacing: 8) {
-                                Circle()
-                                    .fill((appEnv.serverStates[server.id]?.status ?? .unknown).color)
-                                    .frame(width: 8, height: 8)
-
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(server.name).font(.caption).fontWeight(.medium)
-                                    Text(server.sshHost).font(.caption2).foregroundStyle(.tertiary)
+                            if serverToDelete?.id == server.id {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .font(.caption2).foregroundStyle(.orange)
+                                    Text("Remove \"\(server.name)\"?")
+                                        .font(.caption).fontWeight(.medium)
+                                    Spacer()
+                                    Button("Cancel") { serverToDelete = nil }
+                                        .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
+                                    Button("Remove") {
+                                        appEnv.removeServer(server.id)
+                                        serverToDelete = nil
+                                    }
+                                    .font(.caption).buttonStyle(.plain).foregroundStyle(.red)
                                 }
+                                .padding(.vertical, 4)
+                            } else {
+                                HStack(spacing: 8) {
+                                    Circle()
+                                        .fill((appEnv.serverStates[server.id]?.status ?? .unknown).color)
+                                        .frame(width: 8, height: 8)
 
-                                Spacer()
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(server.name).font(.caption).fontWeight(.medium)
+                                        Text(server.sshHost).font(.caption2).foregroundStyle(.tertiary)
+                                    }
 
-                                Button {
-                                    editingServer = server
-                                } label: {
-                                    Image(systemName: "pencil")
-                                        .font(.caption2).foregroundStyle(.secondary)
+                                    Spacer()
+
+                                    Button {
+                                        editingServer = server
+                                    } label: {
+                                        Image(systemName: "pencil")
+                                            .font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                    .buttonStyle(.plain)
+
+                                    Button {
+                                        serverToDelete = server
+                                    } label: {
+                                        Image(systemName: "trash")
+                                            .font(.caption2).foregroundStyle(.red.opacity(0.7))
+                                    }
+                                    .buttonStyle(.plain)
                                 }
-                                .buttonStyle(.plain)
-
-                                Button {
-                                    serverToDelete = server
-                                } label: {
-                                    Image(systemName: "trash")
-                                        .font(.caption2).foregroundStyle(.red.opacity(0.7))
-                                }
-                                .buttonStyle(.plain)
+                                .padding(.vertical, 4)
                             }
-                            .padding(.vertical, 4)
 
                             if server.id != appEnv.settings.servers.last?.id {
                                 Divider().opacity(0.3)
@@ -112,17 +130,6 @@ struct SettingsView: View {
         .onAppear {
             terminalApp = appEnv.settings.terminalApp
             launchAtLogin = appEnv.settings.launchAtLogin
-        }
-        .confirmationDialog(
-            "Remove \"\(serverToDelete?.name ?? "")\"?",
-            isPresented: Binding(get: { serverToDelete != nil }, set: { if !$0 { serverToDelete = nil } }),
-            titleVisibility: .visible
-        ) {
-            Button("Remove", role: .destructive) {
-                if let id = serverToDelete?.id { appEnv.removeServer(id) }
-                serverToDelete = nil
-            }
-            Button("Cancel", role: .cancel) { serverToDelete = nil }
         }
     }
 }
