@@ -6,6 +6,7 @@ struct SettingsView: View {
     @State private var editingServer: ServerConfig?
     @State private var serverToDelete: ServerConfig?
     @State private var terminalApp = "terminal"
+    @State private var launchAtLogin = false
 
     var body: some View {
         if let editing = editingServer {
@@ -93,12 +94,24 @@ struct SettingsView: View {
                         appEnv.settings.terminalApp = val
                     }
                 }
+
+                SectionCard(icon: "gearshape.fill", title: "General", tint: .gray) {
+                    Toggle(isOn: $launchAtLogin) {
+                        Text("Launch at Login").font(.caption)
+                    }
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .onChange(of: launchAtLogin) { _, val in
+                        appEnv.settings.launchAtLogin = val
+                    }
+                }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
         }
         .onAppear {
             terminalApp = appEnv.settings.terminalApp
+            launchAtLogin = appEnv.settings.launchAtLogin
         }
         .confirmationDialog(
             "Remove \"\(serverToDelete?.name ?? "")\"?",

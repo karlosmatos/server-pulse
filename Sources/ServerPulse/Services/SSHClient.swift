@@ -48,10 +48,25 @@ struct SSHClient {
                 return
             }
 
+            // Guard against double-resume: timeout + terminationHandler can both fire
+            // when terminate() is called (terminate causes process exit → handler fires).
+            let lock = NSLock()
+            var resumed = false
+            @Sendable func resume(with result: Result<String, Error>) {
+                lock.lock()
+                defer { lock.unlock() }
+                guard !resumed else { return }
+                resumed = true
+                switch result {
+                case .success(let out): continuation.resume(returning: out)
+                case .failure(let err): continuation.resume(throwing: err)
+                }
+            }
+
             // Hard 15s deadline in case terminationHandler never fires
             let timeout = DispatchWorkItem {
                 process.terminate()
-                continuation.resume(throwing: SSHError.timeout)
+                resume(with: .failure(SSHError.timeout))
             }
             DispatchQueue.global().asyncAfter(deadline: .now() + 15, execute: timeout)
 
@@ -60,11 +75,11 @@ struct SSHClient {
                 let outData = stdout.fileHandleForReading.readDataToEndOfFile()
                 let output = String(data: outData, encoding: .utf8) ?? ""
                 if proc.terminationStatus == 0 {
-                    continuation.resume(returning: output)
+                    resume(with: .success(output))
                 } else {
                     let errData = stderr.fileHandleForReading.readDataToEndOfFile()
                     let errMsg = String(data: errData, encoding: .utf8) ?? ""
-                    continuation.resume(throwing: SSHError.commandFailed(code: proc.terminationStatus, stderr: errMsg))
+                    resume(with: .failure(SSHError.commandFailed(code: proc.terminationStatus, stderr: errMsg)))
                 }
             }
         }

@@ -1,4 +1,5 @@
 import Foundation
+import ServiceManagement
 
 @propertyWrapper
 struct UserDefault<T> {
@@ -36,6 +37,23 @@ final class AppSettings: @unchecked Sendable {
         }
         set {
             UserDefaults.standard.set(newValue?.uuidString, forKey: "servers.selectedID")
+        }
+    }
+
+    // MARK: - Launch at Login
+
+    var launchAtLogin: Bool {
+        get { SMAppService.mainApp.status == .enabled }
+        set {
+            do {
+                if newValue {
+                    try SMAppService.mainApp.register()
+                } else {
+                    try SMAppService.mainApp.unregister()
+                }
+            } catch {
+                // Silently ignore — can fail if app isn't in /Applications
+            }
         }
     }
 
