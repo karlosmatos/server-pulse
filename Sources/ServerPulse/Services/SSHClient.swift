@@ -48,25 +48,14 @@ struct SSHClient {
                 return
             }
 
-            // Guard against double-resume: timeout + terminationHandler can both fire
-            // when terminate() is called (terminate causes process exit → handler fires).
-            let lock = NSLock()
-            var resumed = false
-            @Sendable func resume(with result: Result<String, Error>) {
-                lock.lock()
-                defer { lock.unlock() }
-                guard !resumed else { return }
-                resumed = true
-                switch result {
-                case .success(let out): continuation.resume(returning: out)
-                case .failure(let err): continuation.resume(throwing: err)
-                }
-            }
+            // Both the timeout and terminationHandler share one gate object.
+            // Whichever fires first resumes the continuation; the second is a no-op.
+            // Using a class avoids capturing a `var` in @Sendable closures (data race).
+            let gate = ContinuationGate(continuation)
 
-            // Hard 15s deadline in case terminationHandler never fires
             let timeout = DispatchWorkItem {
                 process.terminate()
-                resume(with: .failure(SSHError.timeout))
+                gate.resume(with: .failure(SSHError.timeout))
             }
             DispatchQueue.global().asyncAfter(deadline: .now() + 15, execute: timeout)
 
@@ -75,13 +64,39 @@ struct SSHClient {
                 let outData = stdout.fileHandleForReading.readDataToEndOfFile()
                 let output = String(data: outData, encoding: .utf8) ?? ""
                 if proc.terminationStatus == 0 {
-                    resume(with: .success(output))
+                    gate.resume(with: .success(output))
                 } else {
                     let errData = stderr.fileHandleForReading.readDataToEndOfFile()
                     let errMsg = String(data: errData, encoding: .utf8) ?? ""
-                    resume(with: .failure(SSHError.commandFailed(code: proc.terminationStatus, stderr: errMsg)))
+                    gate.resume(with: .failure(SSHError.commandFailed(code: proc.terminationStatus, stderr: errMsg)))
                 }
             }
+        }
+    }
+}
+
+// MARK: - ContinuationGate
+
+/// Thread-safe single-fire wrapper for CheckedContinuation.
+/// Whichever caller (timeout or terminationHandler) arrives first resumes
+/// the continuation; all subsequent calls are silently dropped.
+private final class ContinuationGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var fired = false
+    private let continuation: CheckedContinuation<String, Error>
+
+    init(_ continuation: CheckedContinuation<String, Error>) {
+        self.continuation = continuation
+    }
+
+    func resume(with result: Result<String, Error>) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !fired else { return }
+        fired = true
+        switch result {
+        case .success(let out): continuation.resume(returning: out)
+        case .failure(let err): continuation.resume(throwing: err)
         }
     }
 }
