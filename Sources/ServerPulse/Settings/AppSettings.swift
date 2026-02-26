@@ -1,4 +1,5 @@
 import Foundation
+import ServiceManagement
 
 @propertyWrapper
 struct UserDefault<T> {
@@ -12,31 +13,86 @@ struct UserDefault<T> {
 }
 
 final class AppSettings: @unchecked Sendable {
-    @UserDefault(key: "ssh.host",      defaultValue: "")
-    var sshHost: String
+    // Global (not per-server)
+    @UserDefault(key: "terminal.app", defaultValue: "terminal")
+    var terminalApp: String
 
-    @UserDefault(key: "ssh.user",      defaultValue: "")
-    var sshUser: String
+    // MARK: - Server list (JSON in UserDefaults)
 
-    @UserDefault(key: "ssh.keyPath",   defaultValue: "")
-    var sshKeyPath: String
-
-    @UserDefault(key: "ssh.port",      defaultValue: 22)
-    var sshPort: Int
-
-    @UserDefault(key: "n8n.baseURL",   defaultValue: "")
-    var n8nBaseURL: String
-
-    @UserDefault(key: "n8n.apiKey",    defaultValue: "")
-    var n8nAPIKey: String
-
-    @UserDefault(key: "poll.interval", defaultValue: 30.0)
-    var pollingInterval: Double
-
-    var resolvedKeyPath: String {
-        let path = sshKeyPath.isEmpty ? "~/.ssh/id_ed25519" : sshKeyPath
-        return path.hasPrefix("~")
-            ? (path as NSString).expandingTildeInPath
-            : path
+    var servers: [ServerConfig] {
+        get {
+            guard let data = UserDefaults.standard.data(forKey: "servers.list") else { return [] }
+            var configs = (try? JSONDecoder().decode([ServerConfig].self, from: data)) ?? []
+            var needsResave = false
+            for i in configs.indices {
+                let keychainKey = KeychainHelper.get(account: configs[i].id.uuidString) ?? ""
+                if keychainKey.isEmpty && !configs[i].n8nAPIKey.isEmpty {
+                    // Legacy JSON had the key — migrate it to Keychain now.
+                    KeychainHelper.set(configs[i].n8nAPIKey, account: configs[i].id.uuidString)
+                    needsResave = true
+                } else {
+                    configs[i].n8nAPIKey = keychainKey
+                }
+            }
+            if needsResave,
+               let clean = try? JSONEncoder().encode(configs) {
+                UserDefaults.standard.set(clean, forKey: "servers.list")
+            }
+            return configs
+        }
+        set {
+            // Delete Keychain entries for servers that were removed
+            if let existingData = UserDefaults.standard.data(forKey: "servers.list"),
+               let existing = try? JSONDecoder().decode([ServerConfig].self, from: existingData) {
+                let newIDs = Set(newValue.map(\.id))
+                for removed in existing where !newIDs.contains(removed.id) {
+                    KeychainHelper.set("", account: removed.id.uuidString)
+                }
+            }
+            for server in newValue {
+                KeychainHelper.set(server.n8nAPIKey, account: server.id.uuidString)
+            }
+            guard let data = try? JSONEncoder().encode(newValue) else {
+                assertionFailure("Failed to encode servers list")
+                return
+            }
+            UserDefaults.standard.set(data, forKey: "servers.list")
+        }
     }
+
+    var selectedServerID: UUID? {
+        get {
+            guard let str = UserDefaults.standard.string(forKey: "servers.selectedID") else { return nil }
+            return UUID(uuidString: str)
+        }
+        set {
+            UserDefaults.standard.set(newValue?.uuidString, forKey: "servers.selectedID")
+        }
+    }
+
+    // MARK: - Launch at Login
+
+    var launchAtLogin: Bool {
+        get { SMAppService.mainApp.status == .enabled }
+        set {
+            do {
+                if newValue {
+                    try SMAppService.mainApp.register()
+                } else {
+                    try SMAppService.mainApp.unregister()
+                }
+            } catch {
+                // Silently ignore — can fail if app isn't in /Applications
+            }
+        }
+    }
+
+    // MARK: - Legacy keys (for migration)
+
+    static let legacyKeys = [
+        "ssh.host", "ssh.user", "ssh.keyPath", "ssh.port",
+        "n8n.baseURL", "n8n.apiKey",
+        "poll.interval", "process.count", "process.filter",
+        "docker.enabled", "systemd.services",
+    ]
 }

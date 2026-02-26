@@ -2,75 +2,134 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(AppEnvironment.self) private var appEnv
-    @Binding var isPresented: Bool
 
-    @State private var sshHost = ""
-    @State private var sshUser = ""
-    @State private var sshKeyPath = ""
-    @State private var sshPort = ""
-    @State private var n8nBaseURL = ""
-    @State private var n8nAPIKey = ""
-    @State private var pollInterval = 30.0
+    @State private var editingServer: ServerConfig?
+    @State private var serverToDelete: ServerConfig?
+    @State private var terminalApp = "terminal"
+    @State private var launchAtLogin = false
 
     var body: some View {
+        if let editing = editingServer {
+            ServerEditView(config: editing) { updated in
+                if let updated {
+                    if appEnv.settings.servers.contains(where: { $0.id == updated.id }) {
+                        appEnv.updateServer(updated)
+                    } else {
+                        appEnv.addServer(updated)
+                    }
+                }
+                editingServer = nil
+            }
+        } else {
+            serverList
+        }
+    }
+
+    // MARK: - Server list + global settings
+
+    private var serverList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                SectionCard(icon: "lock.shield", title: "SSH Connection", tint: .blue) {
-                    VStack(spacing: 10) {
-                        field("Host", $sshHost, "IP or hostname")
-                        field("User", $sshUser, "root")
-                        field("Port", $sshPort, "22")
-                        field("SSH Key", $sshKeyPath, "~/.ssh/id_ed25519")
-                    }
-                }
-
-                SectionCard(icon: "flowchart", title: "n8n API", tint: .orange) {
-                    VStack(spacing: 10) {
-                        field("Base URL", $n8nBaseURL, "http://host:5678")
-                        HStack(spacing: 8) {
-                            Text("API Key").font(.caption).foregroundStyle(.secondary).frame(width: 56, alignment: .trailing)
-                            SecureField("Paste n8n API key", text: $n8nAPIKey).textFieldStyle(.roundedBorder).font(.caption)
-                        }
-                    }
-                }
-
-                SectionCard(icon: "clock.arrow.2.circlepath", title: "Polling", tint: .green) {
+                SectionCard(icon: "server.rack", title: "Servers", tint: .blue) {
                     VStack(spacing: 6) {
-                        Slider(value: $pollInterval, in: 10...300, step: 5)
-                        Text("Every \(Int(pollInterval)) seconds")
-                            .font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .center)
+                        ForEach(appEnv.settings.servers) { server in
+                            if serverToDelete?.id == server.id {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .font(.caption2).foregroundStyle(.orange)
+                                    Text("Remove \"\(server.name)\"?")
+                                        .font(.caption).fontWeight(.medium)
+                                    Spacer()
+                                    Button("Cancel") { serverToDelete = nil }
+                                        .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
+                                    Button("Remove") {
+                                        appEnv.removeServer(server.id)
+                                        serverToDelete = nil
+                                    }
+                                    .font(.caption).buttonStyle(.plain).foregroundStyle(.red)
+                                }
+                                .padding(.vertical, 4)
+                            } else {
+                                HStack(spacing: 8) {
+                                    Circle()
+                                        .fill((appEnv.serverStates[server.id]?.status ?? .unknown).color)
+                                        .frame(width: 8, height: 8)
+
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(server.name).font(.caption).fontWeight(.medium)
+                                        Text(server.sshHost).font(.caption2).foregroundStyle(.tertiary)
+                                    }
+
+                                    Spacer()
+
+                                    Button {
+                                        editingServer = server
+                                    } label: {
+                                        Image(systemName: "pencil")
+                                            .font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                    .buttonStyle(.plain)
+
+                                    Button {
+                                        serverToDelete = server
+                                    } label: {
+                                        Image(systemName: "trash")
+                                            .font(.caption2).foregroundStyle(.red.opacity(0.7))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                .padding(.vertical, 4)
+                            }
+
+                            if server.id != appEnv.settings.servers.last?.id {
+                                Divider().opacity(0.3)
+                            }
+                        }
+
+                        Button {
+                            editingServer = ServerConfig()
+                        } label: {
+                            HStack {
+                                Image(systemName: "plus.circle.fill").font(.caption)
+                                Text("Add Server").font(.caption)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 6)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Color.accentColor)
                     }
                 }
 
-                Button { save() } label: {
-                    Text("Save").font(.subheadline).fontWeight(.medium).frame(maxWidth: .infinity).padding(.vertical, 6)
+                SectionCard(icon: "terminal.fill", title: "Terminal", tint: .green) {
+                    Picker("App", selection: $terminalApp) {
+                        Text("Terminal.app").tag("terminal")
+                        Text("iTerm2").tag("iterm")
+                    }
+                    .pickerStyle(.segmented)
+                    .font(.caption)
+                    .onChange(of: terminalApp) { _, val in
+                        appEnv.settings.terminalApp = val
+                    }
                 }
-                .buttonStyle(.borderedProminent)
+
+                SectionCard(icon: "gearshape.fill", title: "General", tint: .gray) {
+                    Toggle(isOn: $launchAtLogin) {
+                        Text("Launch at Login").font(.caption)
+                    }
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .onChange(of: launchAtLogin) { _, val in
+                        appEnv.settings.launchAtLogin = val
+                    }
+                }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
         }
         .onAppear {
-            let s = appEnv.settings
-            sshHost = s.sshHost; sshUser = s.sshUser; sshKeyPath = s.sshKeyPath
-            sshPort = String(s.sshPort); n8nBaseURL = s.n8nBaseURL; n8nAPIKey = s.n8nAPIKey
-            pollInterval = s.pollingInterval
+            terminalApp = appEnv.settings.terminalApp
+            launchAtLogin = appEnv.settings.launchAtLogin
         }
-    }
-
-    private func field(_ label: String, _ text: Binding<String>, _ placeholder: String) -> some View {
-        HStack(spacing: 8) {
-            Text(label).font(.caption).foregroundStyle(.secondary).frame(width: 56, alignment: .trailing)
-            TextField(placeholder, text: text).textFieldStyle(.roundedBorder).font(.caption)
-        }
-    }
-
-    private func save() {
-        let s = appEnv.settings
-        s.sshHost = sshHost; s.sshUser = sshUser; s.sshKeyPath = sshKeyPath
-        s.sshPort = Int(sshPort) ?? 22; s.n8nBaseURL = n8nBaseURL; s.n8nAPIKey = n8nAPIKey
-        s.pollingInterval = pollInterval
-        appEnv.startPolling()
-        isPresented = false
     }
 }

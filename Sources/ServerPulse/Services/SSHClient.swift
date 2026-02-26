@@ -15,24 +15,24 @@ enum SSHError: Error, LocalizedError {
 }
 
 struct SSHClient {
-    let settings: AppSettings
+    let config: ServerConfig
 
     func run(_ command: String) async throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
 
         var args = [
-            "-i", settings.resolvedKeyPath,
+            "-i", config.resolvedKeyPath,
             "-o", "BatchMode=yes",
             "-o", "StrictHostKeyChecking=no",
             "-o", "ConnectTimeout=10",
             "-o", "ServerAliveInterval=5",
             "-o", "ServerAliveCountMax=1",
         ]
-        if settings.sshPort != 22 {
-            args += ["-p", String(settings.sshPort)]
+        if config.sshPort != 22 {
+            args += ["-p", String(config.sshPort)]
         }
-        args += ["\(settings.sshUser)@\(settings.sshHost)", command]
+        args += ["\(config.sshUser)@\(config.sshHost)", command]
         process.arguments = args
 
         let stdout = Pipe()
@@ -48,10 +48,14 @@ struct SSHClient {
                 return
             }
 
-            // Hard 15s deadline in case terminationHandler never fires
+            // Both the timeout and terminationHandler share one gate object.
+            // Whichever fires first resumes the continuation; the second is a no-op.
+            // Using a class avoids capturing a `var` in @Sendable closures (data race).
+            let gate = ContinuationGate(continuation)
+
             let timeout = DispatchWorkItem {
                 process.terminate()
-                continuation.resume(throwing: SSHError.timeout)
+                gate.resume(with: .failure(SSHError.timeout))
             }
             DispatchQueue.global().asyncAfter(deadline: .now() + 15, execute: timeout)
 
@@ -60,13 +64,39 @@ struct SSHClient {
                 let outData = stdout.fileHandleForReading.readDataToEndOfFile()
                 let output = String(data: outData, encoding: .utf8) ?? ""
                 if proc.terminationStatus == 0 {
-                    continuation.resume(returning: output)
+                    gate.resume(with: .success(output))
                 } else {
                     let errData = stderr.fileHandleForReading.readDataToEndOfFile()
                     let errMsg = String(data: errData, encoding: .utf8) ?? ""
-                    continuation.resume(throwing: SSHError.commandFailed(code: proc.terminationStatus, stderr: errMsg))
+                    gate.resume(with: .failure(SSHError.commandFailed(code: proc.terminationStatus, stderr: errMsg)))
                 }
             }
+        }
+    }
+}
+
+// MARK: - ContinuationGate
+
+/// Thread-safe single-fire wrapper for CheckedContinuation.
+/// Whichever caller (timeout or terminationHandler) arrives first resumes
+/// the continuation; all subsequent calls are silently dropped.
+private final class ContinuationGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var fired = false
+    private let continuation: CheckedContinuation<String, Error>
+
+    init(_ continuation: CheckedContinuation<String, Error>) {
+        self.continuation = continuation
+    }
+
+    func resume(with result: Result<String, Error>) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !fired else { return }
+        fired = true
+        switch result {
+        case .success(let out): continuation.resume(returning: out)
+        case .failure(let err): continuation.resume(throwing: err)
         }
     }
 }
