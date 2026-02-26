@@ -29,6 +29,14 @@ final class AppSettings: @unchecked Sendable {
             return configs
         }
         set {
+            // Delete Keychain entries for servers that were removed
+            if let existingData = UserDefaults.standard.data(forKey: "servers.list"),
+               let existing = try? JSONDecoder().decode([ServerConfig].self, from: existingData) {
+                let newIDs = Set(newValue.map(\.id))
+                for removed in existing where !newIDs.contains(removed.id) {
+                    KeychainHelper.set("", account: removed.id.uuidString)
+                }
+            }
             for server in newValue {
                 KeychainHelper.set(server.n8nAPIKey, account: server.id.uuidString)
             }

@@ -10,11 +10,16 @@ enum KeychainHelper {
             kSecAttrService: service,
             kSecAttrAccount: account,
         ]
-        SecItemDelete(query as CFDictionary)
+        let deleteStatus = SecItemDelete(query as CFDictionary)
+        guard deleteStatus == errSecSuccess || deleteStatus == errSecItemNotFound else {
+            assertionFailure("Keychain delete failed: \(deleteStatus)")
+            return
+        }
         guard !value.isEmpty else { return }
         var attributes = query
         attributes[kSecValueData] = Data(value.utf8)
-        SecItemAdd(attributes as CFDictionary, nil)
+        let addStatus = SecItemAdd(attributes as CFDictionary, nil)
+        assert(addStatus == errSecSuccess, "Keychain add failed: \(addStatus)")
     }
 
     static func get(account: String) -> String? {

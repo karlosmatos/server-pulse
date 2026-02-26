@@ -6,7 +6,7 @@ enum TerminalLauncher {
         guard !config.sshHost.isEmpty, !config.sshUser.isEmpty else { return }
 
         var parts = ["ssh"]
-        parts.append("-i '\(config.resolvedKeyPath)'")
+        parts.append("-i \"\(config.resolvedKeyPath)\"")
         if config.sshPort != 22 {
             parts.append("-p \(config.sshPort)")
         }
@@ -39,6 +39,10 @@ enum TerminalLauncher {
             }
         default:
             NSWorkspace.shared.open(scriptURL)
+        }
+
+        DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
+            try? FileManager.default.removeItem(at: scriptURL)
         }
     }
 }

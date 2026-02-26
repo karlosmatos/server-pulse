@@ -112,9 +112,12 @@ struct ServerEditView: View {
     }
 
     private func save() {
+        let host = sshHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty else { return }
         var updated = config
-        updated.name = name.isEmpty ? sshHost : name
-        updated.sshHost = sshHost
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.name = trimmedName.isEmpty ? host : trimmedName
+        updated.sshHost = host
         updated.sshUser = sshUser
         updated.sshKeyPath = sshKeyPath
         updated.sshPort = Int(sshPort) ?? 22
