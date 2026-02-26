@@ -49,7 +49,11 @@ final class AppEnvironment {
         let s = AppSettings()
         settings = s
         migrateIfNeeded()
-        selectedServerID = s.selectedServerID ?? s.servers.first?.id
+        let servers = s.servers
+        let savedID = s.selectedServerID
+        selectedServerID = (savedID != nil && servers.contains(where: { $0.id == savedID }))
+            ? savedID
+            : servers.first?.id
 
         // didSet doesn't fire during init, so mark loading if we have servers
         if !s.servers.isEmpty {
