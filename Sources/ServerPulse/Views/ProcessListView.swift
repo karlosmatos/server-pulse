@@ -1,5 +1,6 @@
 import SwiftUI
 
+@MainActor
 struct ProcessListView: View {
     @Environment(AppEnvironment.self) private var appEnv
 

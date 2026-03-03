@@ -67,7 +67,7 @@ open build/ServerPulse.app
 
 Zero external dependencies — uses only the system SSH binary, `URLSession`, and `UserNotifications`.
 
-```
+```text
 Sources/ServerPulse/
 ├── App/          — @main entry, @Observable multi-server state hub
 ├── Models/       — ServerConfig, ServerState, stats, processes, n8n models

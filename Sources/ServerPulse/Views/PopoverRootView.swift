@@ -1,5 +1,6 @@
 import SwiftUI
 
+@MainActor
 struct PopoverRootView: View {
     @Environment(AppEnvironment.self) private var appEnv
     @State private var showSettings = false

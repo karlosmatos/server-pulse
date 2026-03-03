@@ -1,5 +1,6 @@
 import SwiftUI
 
+@MainActor
 struct N8NView: View {
     @Environment(AppEnvironment.self) private var appEnv
     @State private var expanded = false

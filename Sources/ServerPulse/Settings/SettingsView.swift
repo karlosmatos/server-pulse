@@ -1,5 +1,6 @@
 import SwiftUI
 
+@MainActor
 struct SettingsView: View {
     @Environment(AppEnvironment.self) private var appEnv
 

@@ -1,5 +1,6 @@
 import SwiftUI
 
+@MainActor
 struct DockerView: View {
     @Environment(AppEnvironment.self) private var appEnv
 

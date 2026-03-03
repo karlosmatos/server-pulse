@@ -1,5 +1,6 @@
 import SwiftUI
 
+@MainActor
 struct SystemdServicesView: View {
     @Environment(AppEnvironment.self) private var appEnv
 

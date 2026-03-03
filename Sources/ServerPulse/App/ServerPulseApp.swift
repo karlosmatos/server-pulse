@@ -1,6 +1,7 @@
 import SwiftUI
 
 @main
+@MainActor
 struct ServerPulseApp: App {
     @State private var appEnv = AppEnvironment()
 

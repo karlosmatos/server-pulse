@@ -1,5 +1,6 @@
 import SwiftUI
 
+@MainActor
 struct ServerEditView: View {
     let config: ServerConfig
     let onDone: (ServerConfig?) -> Void
