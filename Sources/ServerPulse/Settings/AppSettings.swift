@@ -1,79 +1,115 @@
 import Foundation
 import ServiceManagement
 
-@propertyWrapper
-struct UserDefault<T> {
-    let key: String
-    let defaultValue: T
+protocol KeychainStoring {
+    @discardableResult
+    func set(_ value: String, account: String) -> Bool
 
-    var wrappedValue: T {
-        get { UserDefaults.standard.object(forKey: key) as? T ?? defaultValue }
-        set { UserDefaults.standard.set(newValue, forKey: key) }
+    @discardableResult
+    func delete(account: String) -> Bool
+
+    func get(account: String) -> String?
+}
+
+struct SystemKeychainStore: KeychainStoring {
+    @discardableResult
+    func set(_ value: String, account: String) -> Bool {
+        KeychainHelper.set(value, account: account)
+    }
+
+    @discardableResult
+    func delete(account: String) -> Bool {
+        KeychainHelper.delete(account: account)
+    }
+
+    func get(account: String) -> String? {
+        KeychainHelper.get(account: account)
     }
 }
 
-final class AppSettings: @unchecked Sendable {
+final class AppSettings {
+    private let userDefaults: UserDefaults
+    private let keychain: any KeychainStoring
+    private var cachedServers: [ServerConfig]?
+
+    init(userDefaults: UserDefaults = .standard, keychain: any KeychainStoring = SystemKeychainStore()) {
+        self.userDefaults = userDefaults
+        self.keychain = keychain
+    }
+
     // Global (not per-server)
-    @UserDefault(key: "terminal.app", defaultValue: "terminal")
-    var terminalApp: String
+    var terminalApp: String {
+        get { userDefaults.string(forKey: "terminal.app") ?? "terminal" }
+        set { userDefaults.set(newValue, forKey: "terminal.app") }
+    }
 
     // MARK: - Server list (JSON in UserDefaults)
 
     var servers: [ServerConfig] {
-        get {
-            guard let data = UserDefaults.standard.data(forKey: "servers.list") else { return [] }
-            var configs = (try? JSONDecoder().decode([ServerConfig].self, from: data)) ?? []
-            var needsResave = false
-            for i in configs.indices {
-                let keychainKey = KeychainHelper.get(account: configs[i].id.uuidString) ?? ""
-                if keychainKey.isEmpty && !configs[i].n8nAPIKey.isEmpty {
-                    // Legacy JSON had the key — migrate it to Keychain now.
-                    KeychainHelper.set(configs[i].n8nAPIKey, account: configs[i].id.uuidString)
-                    needsResave = true
-                } else {
-                    configs[i].n8nAPIKey = keychainKey
-                }
-            }
-            if needsResave,
-               let clean = try? JSONEncoder().encode(configs) {
-                UserDefaults.standard.set(clean, forKey: "servers.list")
-            }
-            return configs
+        get { loadServers() }
+        set { _ = saveServers(newValue) }
+    }
+
+    func loadServers() -> [ServerConfig] {
+        if let cachedServers {
+            return cachedServers
         }
-        set {
-            // Delete Keychain entries for servers that were removed
-            if let existingData = UserDefaults.standard.data(forKey: "servers.list"),
-               let existing = try? JSONDecoder().decode([ServerConfig].self, from: existingData) {
-                let newIDs = Set(newValue.map(\.id))
-                for removed in existing where !newIDs.contains(removed.id) {
-                    KeychainHelper.set("", account: removed.id.uuidString)
-                }
-            }
-            for server in newValue {
-                KeychainHelper.set(server.n8nAPIKey, account: server.id.uuidString)
-            }
-            guard let data = try? JSONEncoder().encode(newValue) else {
-                assertionFailure("Failed to encode servers list")
-                return
-            }
-            UserDefaults.standard.set(data, forKey: "servers.list")
+
+        guard let data = userDefaults.data(forKey: "servers.list") else {
+            cachedServers = []
+            return []
         }
+
+        var configs = (try? JSONDecoder().decode([ServerConfig].self, from: data)) ?? []
+        migrateLegacyN8NKeysIfNeeded(&configs)
+        cachedServers = configs
+        return configs
+    }
+
+    @discardableResult
+    func saveServers(_ newValue: [ServerConfig]) -> Bool {
+        let previous = cachedServers ?? loadServers()
+        let previousIDs = Set(previous.map(\.id))
+        let newIDs = Set(newValue.map(\.id))
+
+        for removedID in previousIDs.subtracting(newIDs) {
+            _ = keychain.delete(account: removedID.uuidString)
+        }
+
+        for server in newValue {
+            if !keychain.set(server.n8nAPIKey, account: server.id.uuidString) {
+                print("Failed to persist n8n API key for server: \(server.id.uuidString)")
+                return false
+            }
+        }
+
+        guard let data = try? JSONEncoder().encode(newValue) else {
+            print("Failed to encode servers list")
+            return false
+        }
+
+        userDefaults.set(data, forKey: "servers.list")
+        cachedServers = newValue
+        return true
     }
 
     var selectedServerID: UUID? {
         get {
-            guard let str = UserDefaults.standard.string(forKey: "servers.selectedID") else { return nil }
+            guard let str = userDefaults.string(forKey: "servers.selectedID") else { return nil }
             return UUID(uuidString: str)
         }
         set {
-            UserDefaults.standard.set(newValue?.uuidString, forKey: "servers.selectedID")
+            userDefaults.set(newValue?.uuidString, forKey: "servers.selectedID")
         }
     }
 
     // MARK: - Launch at Login
 
     var launchAtLogin: Bool {
-        get { SMAppService.mainApp.status == .enabled }
+        get {
+            let status = SMAppService.mainApp.status
+            return status == .enabled || status == .requiresApproval
+        }
         set {
             do {
                 if newValue {
@@ -82,7 +118,9 @@ final class AppSettings: @unchecked Sendable {
                     try SMAppService.mainApp.unregister()
                 }
             } catch {
-                // Silently ignore — can fail if app isn't in /Applications
+#if DEBUG
+                print("SMAppService \(newValue ? "register" : "unregister") failed: \(error)")
+#endif
             }
         }
     }
@@ -95,4 +133,31 @@ final class AppSettings: @unchecked Sendable {
         "poll.interval", "process.count", "process.filter",
         "docker.enabled", "systemd.services",
     ]
+
+    private func migrateLegacyN8NKeysIfNeeded(_ configs: inout [ServerConfig]) {
+        var needsResave = false
+
+        for i in configs.indices {
+            let account = configs[i].id.uuidString
+            if let keychainKey = keychain.get(account: account), !keychainKey.isEmpty {
+                configs[i].n8nAPIKey = keychainKey
+                continue
+            }
+
+            let legacyKey = configs[i].n8nAPIKey
+            if !legacyKey.isEmpty {
+                if keychain.set(legacyKey, account: account) {
+                    needsResave = true
+                    configs[i].n8nAPIKey = legacyKey
+                }
+                continue
+            }
+
+            configs[i].n8nAPIKey = ""
+        }
+
+        if needsResave, let clean = try? JSONEncoder().encode(configs) {
+            userDefaults.set(clean, forKey: "servers.list")
+        }
+    }
 }

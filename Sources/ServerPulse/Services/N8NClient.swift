@@ -3,12 +3,14 @@ import Foundation
 enum N8NError: Error, LocalizedError {
     case missingAPIKey
     case invalidURL
+    case invalidScheme
     case httpError(Int)
 
     var errorDescription: String? {
         switch self {
         case .missingAPIKey:   return "n8n API key not configured"
         case .invalidURL:      return "Invalid n8n URL"
+        case .invalidScheme:   return "n8n URL must start with http:// or https://"
         case .httpError(let c): return "n8n HTTP \(c)"
         }
     }
@@ -33,6 +35,17 @@ struct N8NClient {
 
     private func get(_ path: String) async throws -> Data {
         let base = config.n8nBaseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !base.isEmpty else {
+            throw N8NError.invalidURL
+        }
+
+        guard let scheme = URLComponents(string: base)?.scheme?.lowercased() else {
+            throw N8NError.invalidScheme
+        }
+
+        guard scheme == "http" || scheme == "https" else {
+            throw N8NError.invalidScheme
+        }
         guard let url = URL(string: base + path) else { throw N8NError.invalidURL }
 
         var request = URLRequest(url: url, timeoutInterval: 10)

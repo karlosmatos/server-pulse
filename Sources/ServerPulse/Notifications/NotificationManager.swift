@@ -12,7 +12,7 @@ actor NotificationManager {
         self.serverID = serverID
     }
 
-    func requestPermission() async {
+    static func requestPermission() async {
         _ = try? await UNUserNotificationCenter.current()
             .requestAuthorization(options: [.alert, .sound, .badge])
     }

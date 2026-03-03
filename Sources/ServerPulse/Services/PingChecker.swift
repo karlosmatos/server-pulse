@@ -18,16 +18,33 @@ struct PingChecker {
                 return
             }
 
+            let gate = PingContinuationGate(continuation)
+
             let timeout = DispatchWorkItem {
                 process.terminate()
-                continuation.resume(returning: false)
+                Task { await gate.resume(false) }
             }
             DispatchQueue.global().asyncAfter(deadline: .now() + 8, execute: timeout)
 
             process.terminationHandler = { proc in
                 timeout.cancel()
-                continuation.resume(returning: proc.terminationStatus == 0)
+                Task { await gate.resume(proc.terminationStatus == 0) }
             }
         }
+    }
+}
+
+actor PingContinuationGate {
+    private var fired = false
+    private let continuation: CheckedContinuation<Bool, Never>
+
+    init(_ continuation: CheckedContinuation<Bool, Never>) {
+        self.continuation = continuation
+    }
+
+    func resume(_ value: Bool) {
+        guard !fired else { return }
+        fired = true
+        continuation.resume(returning: value)
     }
 }

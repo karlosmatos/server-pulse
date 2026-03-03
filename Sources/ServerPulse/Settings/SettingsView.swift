@@ -12,7 +12,7 @@ struct SettingsView: View {
         if let editing = editingServer {
             ServerEditView(config: editing) { updated in
                 if let updated {
-                    if appEnv.settings.servers.contains(where: { $0.id == updated.id }) {
+                    if appEnv.servers.contains(where: { $0.id == updated.id }) {
                         appEnv.updateServer(updated)
                     } else {
                         appEnv.addServer(updated)
@@ -21,8 +21,62 @@ struct SettingsView: View {
                 editingServer = nil
             }
         } else {
-            serverList
+            ZStack {
+                serverList.disabled(serverToDelete != nil)
+                if let toDelete = serverToDelete {
+                    deleteConfirmView(for: toDelete).zIndex(1)
+                }
+            }
         }
+    }
+
+    // MARK: - Delete confirmation
+
+    private func deleteConfirmView(for server: ServerConfig) -> some View {
+        ZStack {
+            VStack(spacing: 0) {
+                Spacer()
+
+                VStack(spacing: 20) {
+                    Image(systemName: "trash.circle.fill")
+                        .font(.system(size: 52))
+                        .foregroundStyle(.red)
+                        .symbolRenderingMode(.hierarchical)
+
+                    VStack(spacing: 6) {
+                        Text("Remove Server?")
+                            .font(.headline)
+                        Text(server.name)
+                            .font(.subheadline).fontWeight(.medium)
+                        Text(server.sshHost)
+                            .font(.caption).foregroundStyle(.tertiary)
+                    }
+
+                    Text("Return to confirm · Esc to cancel")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+
+                Spacer()
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(nsColor: .windowBackgroundColor))
+
+            // Hidden buttons — keyboard shortcuts only
+            Group {
+                Button("") { serverToDelete = nil }
+                    .keyboardShortcut(.escape, modifiers: [])
+                Button("") {
+                    appEnv.removeServer(server.id)
+                    serverToDelete = nil
+                }
+                .keyboardShortcut(.return, modifiers: [])
+            }
+            .frame(width: 0, height: 0)
+            .opacity(0)
+        }
+        .onAppear { NSApp.activate(ignoringOtherApps: true) }
     }
 
     // MARK: - Server list + global settings
@@ -30,58 +84,47 @@ struct SettingsView: View {
     private var serverList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                if let saveError = appEnv.settingsErrorMessage {
+                    Text(saveError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
                 SectionCard(icon: "server.rack", title: "Servers", tint: .blue) {
                     VStack(spacing: 6) {
-                        ForEach(appEnv.settings.servers) { server in
-                            if serverToDelete?.id == server.id {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "exclamationmark.triangle.fill")
-                                        .font(.caption2).foregroundStyle(.orange)
-                                    Text("Remove \"\(server.name)\"?")
-                                        .font(.caption).fontWeight(.medium)
-                                    Spacer()
-                                    Button("Cancel") { serverToDelete = nil }
-                                        .font(.caption).buttonStyle(.plain).foregroundStyle(.secondary)
-                                    Button("Remove") {
-                                        appEnv.removeServer(server.id)
-                                        serverToDelete = nil
-                                    }
-                                    .font(.caption).buttonStyle(.plain).foregroundStyle(.red)
+                        ForEach(appEnv.servers) { server in
+                            HStack(spacing: 8) {
+                                Circle()
+                                    .fill((appEnv.serverStates[server.id]?.status ?? .unknown).color)
+                                    .frame(width: 8, height: 8)
+
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(server.name).font(.caption).fontWeight(.medium)
+                                    Text(server.sshHost).font(.caption2).foregroundStyle(.tertiary)
                                 }
-                                .padding(.vertical, 4)
-                            } else {
-                                HStack(spacing: 8) {
-                                    Circle()
-                                        .fill((appEnv.serverStates[server.id]?.status ?? .unknown).color)
-                                        .frame(width: 8, height: 8)
 
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(server.name).font(.caption).fontWeight(.medium)
-                                        Text(server.sshHost).font(.caption2).foregroundStyle(.tertiary)
-                                    }
+                                Spacer()
 
-                                    Spacer()
-
-                                    Button {
-                                        editingServer = server
-                                    } label: {
-                                        Image(systemName: "pencil")
-                                            .font(.caption2).foregroundStyle(.secondary)
-                                    }
-                                    .buttonStyle(.plain)
-
-                                    Button {
-                                        serverToDelete = server
-                                    } label: {
-                                        Image(systemName: "trash")
-                                            .font(.caption2).foregroundStyle(.red.opacity(0.7))
-                                    }
-                                    .buttonStyle(.plain)
+                                Button {
+                                    editingServer = server
+                                } label: {
+                                    Image(systemName: "pencil")
+                                        .font(.caption2).foregroundStyle(.secondary)
                                 }
-                                .padding(.vertical, 4)
+                                .buttonStyle(.plain)
+
+                                Button {
+                                    serverToDelete = server
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .font(.caption2).foregroundStyle(.red.opacity(0.7))
+                                }
+                                .buttonStyle(.plain)
                             }
+                            .padding(.vertical, 4)
 
-                            if server.id != appEnv.settings.servers.last?.id {
+                            if server.id != appEnv.servers.last?.id {
                                 Divider().opacity(0.3)
                             }
                         }

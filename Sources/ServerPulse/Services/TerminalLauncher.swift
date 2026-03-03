@@ -4,27 +4,27 @@ import AppKit
 enum TerminalLauncher {
     static func openSSH(config: ServerConfig, terminalApp: String) {
         guard !config.sshHost.isEmpty, !config.sshUser.isEmpty else { return }
-
-        var parts = ["ssh"]
-        parts.append("-i \"\(config.resolvedKeyPath)\"")
-        if config.sshPort != 22 {
-            parts.append("-p \(config.sshPort)")
+        guard let scriptDirectory = prepareScriptDirectory() else {
+            print("Failed to prepare SSH script directory")
+            return
         }
-        parts.append("\(config.sshUser)@\(config.sshHost)")
+        cleanupStaleScripts(in: scriptDirectory)
 
-        let sshCommand = parts.joined(separator: " ")
+        var args = ["ssh", "-i", shellQuote(config.resolvedKeyPath)]
+        if config.sshPort != 22 { args += ["-p", String(config.sshPort)] }
+        args.append(shellQuote("\(config.sshUser)@\(config.sshHost)"))
+        let script = "#!/bin/bash\n\(args.joined(separator: " "))\n"
 
-        // Write a temporary .command file and open it — no AppleScript/Automation
-        // permission needed; Terminal.app (and iTerm2) open .command files natively.
-        let scriptURL = FileManager.default.temporaryDirectory
+        let scriptURL = scriptDirectory
             .appendingPathComponent("serverpulse-ssh-\(UUID().uuidString).command")
 
-        do {
-            try "#!/bin/bash\n\(sshCommand)\n"
-                .write(to: scriptURL, atomically: true, encoding: .utf8)
-            try FileManager.default.setAttributes(
-                [.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
-        } catch {
+        let created = FileManager.default.createFile(
+            atPath: scriptURL.path,
+            contents: Data(script.utf8),
+            attributes: [.posixPermissions: 0o700]
+        )
+        guard created else {
+            print("Failed to create temporary SSH script at \(scriptURL.path)")
             return
         }
 
@@ -43,6 +43,42 @@ enum TerminalLauncher {
 
         DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
             try? FileManager.default.removeItem(at: scriptURL)
+        }
+    }
+
+    private static func shellQuote(_ s: String) -> String {
+        "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    private static func prepareScriptDirectory() -> URL? {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("serverpulse-ssh-scripts", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
+            return dir
+        } catch {
+            print("Failed to prepare temporary SSH script directory: \(error)")
+            return nil
+        }
+    }
+
+    private static func cleanupStaleScripts(in directory: URL, olderThan seconds: TimeInterval = 60 * 60) {
+        let fileManager = FileManager.default
+        guard let urls = try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return
+        }
+
+        let cutoff = Date().addingTimeInterval(-seconds)
+        for url in urls where url.pathExtension == "command" {
+            let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
+            let modified = values?.contentModificationDate ?? .distantPast
+            if modified < cutoff {
+                try? fileManager.removeItem(at: url)
+            }
         }
     }
 }

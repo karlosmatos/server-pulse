@@ -3,7 +3,7 @@ import Foundation
 @Observable
 @MainActor
 final class AppEnvironment {
-    // MARK: - Projected state (selected server → flat properties)
+    // MARK: - Projected state (selected server -> flat properties)
     var serverStatus: ServerStatus = .unknown
     var stats: ServerStats?
     var processes: [ServerProcess] = []
@@ -14,14 +14,19 @@ final class AppEnvironment {
     var lastUpdated: Date?
     var errorMessage: String?
     var isLoading: Bool = false
+    var settingsErrorMessage: String?
 
     let settings: AppSettings
 
     // MARK: - Multi-server state
 
+    private(set) var servers: [ServerConfig] = []
     private(set) var serverStates: [UUID: ServerState] = [:]
     private var pollingServices: [UUID: PollingService] = [:]
     private var pollingTasks: [UUID: Task<Void, Never>] = [:]
+    private var didRequestNotificationPermission = false
+    private let pollingServiceFactory: (ServerConfig) -> PollingService
+    private let notificationPermissionRequester: @Sendable () async -> Void
 
     var selectedServerID: UUID? {
         didSet {
@@ -31,7 +36,7 @@ final class AppEnvironment {
     }
 
     var selectedServer: ServerConfig? {
-        settings.servers.first { $0.id == selectedServerID }
+        servers.first { $0.id == selectedServerID }
     }
 
     /// Worst status across all servers (for menu bar icon).
@@ -45,22 +50,31 @@ final class AppEnvironment {
 
     // MARK: - Init
 
-    init() {
-        let s = AppSettings()
-        settings = s
+    init(
+        settings: AppSettings = AppSettings(),
+        pollingServiceFactory: @escaping (ServerConfig) -> PollingService = { PollingService(config: $0) },
+        notificationPermissionRequester: @escaping @Sendable () async -> Void = { await NotificationManager.requestPermission() },
+        autoStartPolling: Bool = true
+    ) {
+        self.settings = settings
+        self.pollingServiceFactory = pollingServiceFactory
+        self.notificationPermissionRequester = notificationPermissionRequester
+
+        servers = settings.loadServers()
         migrateIfNeeded()
-        let servers = s.servers
-        let savedID = s.selectedServerID
+        servers = settings.loadServers()
+
+        let savedID = settings.selectedServerID
         selectedServerID = (savedID != nil && servers.contains(where: { $0.id == savedID }))
             ? savedID
             : servers.first?.id
 
-        // didSet doesn't fire during init, so mark loading if we have servers
-        if !s.servers.isEmpty {
+        if !servers.isEmpty {
             isLoading = true
         }
 
-        for server in s.servers {
+        guard autoStartPolling else { return }
+        for server in servers {
             startPolling(for: server)
         }
     }
@@ -68,9 +82,9 @@ final class AppEnvironment {
     // MARK: - Server management
 
     func addServer(_ config: ServerConfig) {
-        var list = settings.servers
+        var list = servers
         list.append(config)
-        settings.servers = list
+        guard persistServers(list) else { return }
 
         startPolling(for: config)
 
@@ -80,12 +94,11 @@ final class AppEnvironment {
     }
 
     func updateServer(_ config: ServerConfig) {
-        var list = settings.servers
+        var list = servers
         guard let idx = list.firstIndex(where: { $0.id == config.id }) else { return }
         list[idx] = config
-        settings.servers = list
+        guard persistServers(list) else { return }
 
-        // Restart polling with new config
         stopPolling(for: config.id)
         startPolling(for: config)
 
@@ -98,9 +111,9 @@ final class AppEnvironment {
         stopPolling(for: id)
         serverStates.removeValue(forKey: id)
 
-        var list = settings.servers
+        var list = servers
         list.removeAll { $0.id == id }
-        settings.servers = list
+        guard persistServers(list) else { return }
 
         if selectedServerID == id {
             selectedServerID = list.first?.id
@@ -108,28 +121,32 @@ final class AppEnvironment {
     }
 
     func refreshNow() {
-        guard let id = selectedServerID, let config = selectedServer else { return }
+        guard let id = selectedServerID,
+              let serviceID = pollingServices[id]?.instanceID else { return }
         Task { [weak self] in
-            await self?.refreshServer(id: id, config: config)
+            await self?.refreshServer(id: id, expectedServiceID: serviceID)
         }
     }
 
     // MARK: - Polling
 
     func startPolling(for config: ServerConfig) {
-        let service = PollingService(config: config)
+        Task { [weak self] in
+            await self?.requestNotificationPermissionIfNeeded()
+        }
+
+        let service = pollingServiceFactory(config)
         pollingServices[config.id] = service
         serverStates[config.id] = serverStates[config.id] ?? ServerState()
 
         pollingTasks[config.id]?.cancel()
-        pollingTasks[config.id] = Task { [weak self, id = config.id] in
-            // Request notification permission on first poll
-            await service.notifications.requestPermission()
+        pollingTasks[config.id] = Task { [weak self, id = config.id, serviceID = service.instanceID] in
             while !Task.isCancelled {
-                await self?.refreshServer(id: id, config: config)
+                await self?.refreshServer(id: id, expectedServiceID: serviceID)
                 let rawInterval = config.pollingInterval
-                let interval = (rawInterval.isFinite && rawInterval > 0) ? rawInterval : 30.0
-                let nanos = min(interval * 1_000_000_000, Double(UInt64.max))
+                let safeInterval = rawInterval.isFinite ? rawInterval : 30.0
+                let clampedInterval = max(10.0, min(safeInterval, 3_600.0))
+                let nanos = min(clampedInterval * 1_000_000_000, Double(UInt64.max))
                 try? await Task.sleep(nanoseconds: UInt64(nanos))
             }
         }
@@ -137,21 +154,41 @@ final class AppEnvironment {
 
     // MARK: - Private
 
+    private func requestNotificationPermissionIfNeeded() async {
+        guard !didRequestNotificationPermission else { return }
+        didRequestNotificationPermission = true
+        await notificationPermissionRequester()
+    }
+
+    @discardableResult
+    private func persistServers(_ newServers: [ServerConfig]) -> Bool {
+        guard settings.saveServers(newServers) else {
+            settingsErrorMessage = "Failed to save settings. Please check Console logs for details."
+            return false
+        }
+
+        settingsErrorMessage = nil
+        servers = newServers
+        return true
+    }
+
     private func stopPolling(for id: UUID) {
         pollingTasks[id]?.cancel()
         pollingTasks.removeValue(forKey: id)
         pollingServices.removeValue(forKey: id)
     }
 
-    private func refreshServer(id: UUID, config: ServerConfig) async {
-        guard let service = pollingServices[id] else { return }
+    private func refreshServer(id: UUID, expectedServiceID: UUID) async {
+        guard let service = pollingServices[id], service.instanceID == expectedServiceID else { return }
 
         if id == selectedServerID { isLoading = true }
         serverStates[id]?.isLoading = true
 
         let result = await service.poll()
 
-        guard !Task.isCancelled, pollingServices[id] != nil else { return }
+        guard !Task.isCancelled,
+              let activeService = pollingServices[id],
+              activeService.instanceID == expectedServiceID else { return }
 
         var state = serverStates[id] ?? ServerState()
         state.status = result.status
@@ -199,17 +236,15 @@ final class AppEnvironment {
     }
 
     private func migrateIfNeeded() {
-        guard settings.servers.isEmpty else { return }
+        guard servers.isEmpty else { return }
 
-        // Try legacy UserDefaults first
         if let config = EnvLoader.migrateLegacyDefaults() {
-            settings.servers = [config]
+            _ = persistServers([config])
             return
         }
 
-        // Try .env file
         if let config = EnvLoader.loadFromEnvFile() {
-            settings.servers = [config]
+            _ = persistServers([config])
         }
     }
 }

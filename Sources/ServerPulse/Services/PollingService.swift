@@ -12,22 +12,33 @@ struct PollResult {
 }
 
 struct PollingService {
+    let instanceID: UUID
     let config: ServerConfig
     let ssh: SSHClient
     let ping: PingChecker
     let n8n: N8NClient
     let notifications: NotificationManager
+    private let pollOverride: (() async -> PollResult)?
 
-    init(config: ServerConfig) {
+    init(config: ServerConfig, pollOverride: (() async -> PollResult)? = nil) {
+        self.instanceID = UUID()
         self.config = config
         self.ssh = SSHClient(config: config)
         self.ping = PingChecker()
         self.n8n = N8NClient(config: config)
         self.notifications = NotificationManager(serverName: config.name, serverID: config.id)
+        self.pollOverride = pollOverride
     }
 
     func poll() async -> PollResult {
+        if let pollOverride {
+            return await pollOverride()
+        }
+
         let psCommand = SSHCommandParser.processCommand(count: config.processCount, filter: config.processFilter)
+        let baseURL = config.n8nBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let scheme = URL(string: baseURL)?.scheme?.lowercased()
+        let shouldPollN8N = !config.n8nAPIKey.isEmpty && (scheme == "http" || scheme == "https")
 
         // All I/O runs concurrently
         async let reachable  = ping.isReachable(host: config.sshHost)
@@ -45,8 +56,8 @@ struct PollingService {
             }
             return nil
         }()
-        async let workflows  = try? n8n.fetchWorkflows()
-        async let executions = try? n8n.fetchRecentExecutions()
+        async let workflows: [N8NWorkflow]? = shouldPollN8N ? (try? n8n.fetchWorkflows()) : nil
+        async let executions: [N8NExecution]? = shouldPollN8N ? (try? n8n.fetchRecentExecutions()) : nil
 
         let (isUp, cpu, ram, disk, ps, uptime, docker, systemd, wf, exec) = await (
             reachable, cpuOut, ramOut, diskOut, psOut, uptimeOut, dockerOut, systemdOut, workflows, executions

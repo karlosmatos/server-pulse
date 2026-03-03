@@ -28,7 +28,7 @@ struct PopoverRootView: View {
     private var mainContent: some View {
         ScrollView {
             VStack(spacing: 10) {
-                if appEnv.settings.servers.count > 1 {
+                if appEnv.servers.count > 1 {
                     serverPicker
                 }
                 ServerHeaderView()
@@ -46,7 +46,7 @@ struct PopoverRootView: View {
     private var serverPicker: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                ForEach(appEnv.settings.servers) { server in
+                ForEach(appEnv.servers) { server in
                     let isSelected = server.id == appEnv.selectedServerID
                     let state = appEnv.serverStates[server.id]
 

@@ -114,20 +114,34 @@ struct ServerEditView: View {
     private func save() {
         let host = sshHost.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !host.isEmpty else { return }
+
+        let user = sshUser.trimmingCharacters(in: .whitespacesAndNewlines)
+        let keyPath = sshKeyPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseURL = n8nBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedFilter = processFilter.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedServices = systemdServices.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let parsedPort = Int(sshPort.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 22
+        let parsedCount = Int(processCount.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 10
+        let clampedPort = min(max(parsedPort, 1), 65_535)
+        let clampedCount = min(max(parsedCount, 1), 200)
+        let safeInterval = pollInterval.isFinite ? pollInterval : 30.0
+        let clampedInterval = min(max(safeInterval, 10.0), 300.0)
+
         var updated = config
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.name = trimmedName.isEmpty ? host : trimmedName
         updated.sshHost = host
-        updated.sshUser = sshUser
-        updated.sshKeyPath = sshKeyPath
-        updated.sshPort = Int(sshPort) ?? 22
-        updated.n8nBaseURL = n8nBaseURL
+        updated.sshUser = user
+        updated.sshKeyPath = keyPath
+        updated.sshPort = clampedPort
+        updated.n8nBaseURL = baseURL
         updated.n8nAPIKey = n8nAPIKey
-        updated.pollingInterval = pollInterval
-        updated.processCount = Int(processCount) ?? 10
-        updated.processFilter = processFilter
+        updated.pollingInterval = clampedInterval
+        updated.processCount = clampedCount
+        updated.processFilter = trimmedFilter
         updated.dockerEnabled = dockerEnabled
-        updated.systemdServices = systemdServices
+        updated.systemdServices = trimmedServices
         onDone(updated)
     }
 }
