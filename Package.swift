@@ -16,6 +16,11 @@ let package = Package(
                     "-Xlinker", "Resources/Info.plist"
                 ])
             ]
-        )
+        ),
+        .testTarget(
+            name: "ServerPulseTests",
+            dependencies: ["ServerPulse"],
+            path: "Tests/ServerPulseTests"
+        ),
     ]
 )

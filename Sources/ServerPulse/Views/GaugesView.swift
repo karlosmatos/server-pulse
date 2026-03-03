@@ -1,5 +1,6 @@
 import SwiftUI
 
+@MainActor
 struct GaugesView: View {
     @Environment(AppEnvironment.self) private var appEnv
 

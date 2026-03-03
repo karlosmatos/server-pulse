@@ -1,6 +1,7 @@
 import SwiftUI
 
 @main
+@MainActor
 struct ServerPulseApp: App {
     @State private var appEnv = AppEnvironment()
 
@@ -9,7 +10,7 @@ struct ServerPulseApp: App {
             PopoverRootView()
                 .environment(appEnv)
         } label: {
-            MenuBarLabel(status: appEnv.serverStatus)
+            MenuBarLabel(status: appEnv.worstStatus)
         }
         .menuBarExtraStyle(.window)
     }
