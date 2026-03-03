@@ -58,9 +58,55 @@ After first launch, all configuration is managed via the gear icon → Settings.
 # Dev run
 swift run
 
-# Production .app bundle (installs codesigned app to build/)
+# Local app build + install to /Applications (ad-hoc signed, development use)
 chmod +x build.sh && ./build.sh
-open build/ServerPulse.app
+```
+
+## Distribution (Downloadable App)
+
+End-user flow:
+1. Download the latest `ServerPulse-<version>.dmg` from GitHub Releases.
+2. Open the DMG and drag `ServerPulse.app` to `Applications`.
+3. Launch `ServerPulse` from `Applications`.
+
+### Local signed + notarized DMG
+
+```bash
+# One-time: store notarization credentials in keychain profile AC_NOTARY
+xcrun notarytool store-credentials AC_NOTARY \
+  --apple-id "you@example.com" \
+  --team-id "TEAMID1234" \
+  --password "app-specific-password"
+
+# Build signed/notarized DMG
+DEV_ID_APP_CERT="Developer ID Application: Your Name (TEAMID1234)" \
+VERSION="1.0.0" \
+./scripts/release.sh
+```
+
+Output artifact: `build/ServerPulse-1.0.0.dmg`
+
+### Automated GitHub Releases on tags
+
+This repo includes a workflow at `.github/workflows/release.yml` that runs on tags matching `v*` and publishes a notarized DMG.
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Required GitHub Actions secrets:
+- `APPLE_DEVELOPER_ID_APPLICATION_CERT_BASE64` (base64-encoded `.p12`)
+- `APPLE_DEVELOPER_ID_APPLICATION_CERT_PASSWORD`
+- `APPLE_DEVELOPER_ID_APPLICATION_IDENTITY` (for example `Developer ID Application: Your Name (TEAMID1234)`)
+- `APPLE_NOTARY_APPLE_ID`
+- `APPLE_NOTARY_APP_SPECIFIC_PASSWORD`
+- `APPLE_TEAM_ID`
+
+Example for `APPLE_DEVELOPER_ID_APPLICATION_CERT_BASE64`:
+
+```bash
+base64 -i developer_id_application.p12 | pbcopy
 ```
 
 ## Architecture
