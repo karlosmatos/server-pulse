@@ -5,11 +5,16 @@ struct PopoverRootView: View {
     @Environment(AppEnvironment.self) private var appEnv
     @State private var showSettings = false
     @State private var spinning = false
+    @State private var terminalLaunchIssue: TerminalLaunchIssue?
+    @State private var terminalLaunchIssueDismissTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider().opacity(0.4)
+            if let issue = terminalLaunchIssue {
+                terminalLaunchBanner(issue)
+            }
 
             if showSettings {
                 SettingsView().environment(appEnv)
@@ -22,6 +27,9 @@ struct PopoverRootView: View {
         }
         .frame(width: 420, height: 700)
         .onChange(of: appEnv.isLoading) { _, val in spinning = val }
+        .onDisappear {
+            terminalLaunchIssueDismissTask?.cancel()
+        }
     }
 
     // MARK: - Sections
@@ -101,10 +109,12 @@ struct PopoverRootView: View {
                 }
                 headerButton("terminal.fill") {
                     if let config = appEnv.selectedServer {
-                        TerminalLauncher.openSSH(config: config, terminalApp: appEnv.settings.terminalApp)
+                        presentTerminalLaunchIssue(
+                            TerminalLauncher.openSSH(config: config, terminalApp: appEnv.settings.terminalApp)
+                        )
                     }
                 }
-                .help("Open SSH session in Terminal")
+                .help("Open SSH session in \(appEnv.settings.terminalApp == "iterm" ? "iTerm2" : "Terminal.app")")
                 .disabled({
                     guard let s = appEnv.selectedServer else { return true }
                     return s.sshHost.isEmpty || s.sshUser.isEmpty
@@ -146,5 +156,67 @@ struct PopoverRootView: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
+    }
+
+    private func presentTerminalLaunchIssue(_ issue: TerminalLaunchIssue?) {
+        terminalLaunchIssueDismissTask?.cancel()
+        withAnimation(.easeInOut(duration: 0.18)) {
+            terminalLaunchIssue = issue
+        }
+
+        guard issue != nil else { return }
+        terminalLaunchIssueDismissTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.18)) {
+                terminalLaunchIssue = nil
+            }
+        }
+    }
+
+    private func dismissTerminalLaunchIssue() {
+        terminalLaunchIssueDismissTask?.cancel()
+        withAnimation(.easeInOut(duration: 0.18)) {
+            terminalLaunchIssue = nil
+        }
+    }
+
+    private func terminalLaunchBanner(_ issue: TerminalLaunchIssue) -> some View {
+        let tint: Color = issue.severity == .error ? .red : .orange
+        let icon = issue.severity == .error ? "xmark.octagon.fill" : "exclamationmark.triangle.fill"
+
+        return HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundStyle(tint)
+                .padding(.top, 2)
+
+            Text(issue.message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button {
+                dismissTerminalLaunchIssue()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(tint.opacity(0.10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(tint.opacity(0.22), lineWidth: 1)
+                )
+        )
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .transition(.move(edge: .top).combined(with: .opacity))
     }
 }

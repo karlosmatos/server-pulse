@@ -1,20 +1,90 @@
 import Foundation
 import AppKit
+import OSLog
+
+struct TerminalLaunchIssue: Identifiable {
+    enum Severity {
+        case warning
+        case error
+    }
+
+    let id = UUID()
+    let severity: Severity
+    let message: String
+
+    static func warning(_ message: String) -> Self {
+        .init(severity: .warning, message: message)
+    }
+
+    static func error(_ message: String) -> Self {
+        .init(severity: .error, message: message)
+    }
+}
 
 enum TerminalLauncher {
-    static func openSSH(config: ServerConfig, terminalApp: String) {
-        guard !config.sshHost.isEmpty, !config.sshUser.isEmpty else { return }
-        guard let scriptDirectory = prepareScriptDirectory() else {
-            print("Failed to prepare SSH script directory")
-            return
-        }
-        cleanupStaleScripts(in: scriptDirectory)
+    private static let logger = Logger(subsystem: "ServerPulse", category: "TerminalLauncher")
 
+    @discardableResult
+    static func openSSH(config: ServerConfig, terminalApp: String) -> TerminalLaunchIssue? {
+        guard !config.sshHost.isEmpty, !config.sshUser.isEmpty else {
+            let issue = TerminalLaunchIssue.error("SSH host and user are required before opening a terminal session.")
+            logger.error("\(issue.message, privacy: .public)")
+            return issue
+        }
+        let command = sshCommand(for: config)
+
+        switch terminalApp.lowercased() {
+        case "iterm", "iterm2":
+            guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.googlecode.iterm2") else {
+                logger.error("iTerm2 bundle identifier could not be resolved")
+                guard let scriptURL = createScript(command: command) else {
+                    return TerminalLaunchIssue.error("iTerm2 wasn't found, and ServerPulse couldn't create the fallback SSH launcher.")
+                }
+                guard openScript(scriptURL) else {
+                    return TerminalLaunchIssue.error("iTerm2 wasn't found, and macOS refused to open the fallback SSH launcher.")
+                }
+                scheduleCleanup(for: scriptURL)
+                return TerminalLaunchIssue.warning("iTerm2 wasn't found. Opened the SSH script with the default terminal app instead.")
+            }
+
+            let automationError = openInITerm(command: command)
+            if automationError == nil {
+                return nil
+            }
+
+            guard let scriptURL = createScript(command: command) else {
+                return TerminalLaunchIssue.error("ServerPulse couldn't create the fallback SSH launcher after the iTerm2 automation request failed.")
+            }
+            openScript(scriptURL, withApplicationAt: appURL)
+            scheduleCleanup(for: scriptURL)
+            return terminalAutomationIssue(from: automationError)
+        default:
+            guard let scriptURL = createScript(command: command) else {
+                return TerminalLaunchIssue.error("ServerPulse couldn't create the temporary SSH launcher. Check Console for details.")
+            }
+            guard openScript(scriptURL) else {
+                return TerminalLaunchIssue.error("macOS refused to open the temporary SSH launcher. Check Console for details.")
+            }
+            scheduleCleanup(for: scriptURL)
+            return nil
+        }
+    }
+
+    private static func sshCommand(for config: ServerConfig) -> String {
         var args = ["ssh", "-i", shellQuote(config.resolvedKeyPath)]
         if config.sshPort != 22 { args += ["-p", String(config.sshPort)] }
         args.append(shellQuote("\(config.sshUser)@\(config.sshHost)"))
-        let script = "#!/bin/bash\n\(args.joined(separator: " "))\n"
+        return args.joined(separator: " ")
+    }
 
+    private static func createScript(command: String) -> URL? {
+        guard let scriptDirectory = prepareScriptDirectory() else {
+            logger.error("Failed to prepare SSH script directory")
+            return nil
+        }
+        cleanupStaleScripts(in: scriptDirectory)
+
+        let script = "#!/bin/bash\n\(command)\n"
         let scriptURL = scriptDirectory
             .appendingPathComponent("serverpulse-ssh-\(UUID().uuidString).command")
 
@@ -23,27 +93,93 @@ enum TerminalLauncher {
             contents: Data(script.utf8),
             attributes: [.posixPermissions: 0o700]
         )
+
         guard created else {
-            print("Failed to create temporary SSH script at \(scriptURL.path)")
-            return
+            logger.error("Failed to create temporary SSH script")
+            return nil
         }
 
-        switch terminalApp.lowercased() {
-        case "iterm", "iterm2":
-            if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.googlecode.iterm2") {
-                let cfg = NSWorkspace.OpenConfiguration()
-                cfg.activates = true
-                NSWorkspace.shared.open([scriptURL], withApplicationAt: appURL, configuration: cfg)
-            } else {
-                NSWorkspace.shared.open(scriptURL)
-            }
-        default:
-            NSWorkspace.shared.open(scriptURL)
-        }
+        return scriptURL
+    }
 
-        DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
+    private static func openInITerm(command: String) -> NSDictionary? {
+        let scriptSource = """
+        tell application "iTerm2"
+            activate
+            if (count of windows) = 0 then
+                create window with default profile command "\(appleScriptQuote(command))"
+            else
+                tell current window
+                    create tab with default profile command "\(appleScriptQuote(command))"
+                end tell
+            end if
+        end tell
+        """
+
+        var error: NSDictionary?
+        let script = NSAppleScript(source: scriptSource)
+        let result = script?.executeAndReturnError(&error)
+        guard result != nil else {
+            let code = (error?[NSAppleScript.errorNumber] as? NSNumber)?.intValue ?? 0
+            let brief = (error?[NSAppleScript.errorBriefMessage] as? String)
+                ?? (error?[NSAppleScript.errorMessage] as? String)
+                ?? "Unknown AppleScript error"
+            logger.error("Failed to launch iTerm2 via AppleScript (\(code)): \(brief, privacy: .public)")
+            return error
+        }
+        return nil
+    }
+
+    private static func scheduleCleanup(for scriptURL: URL, after seconds: TimeInterval = 60) {
+        DispatchQueue.global().asyncAfter(deadline: .now() + seconds) {
             try? FileManager.default.removeItem(at: scriptURL)
         }
+    }
+
+    private static func appleScriptQuote(_ s: String) -> String {
+        s
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    @discardableResult
+    private static func openScript(_ scriptURL: URL) -> Bool {
+        let opened = NSWorkspace.shared.open(scriptURL)
+        if !opened {
+            logger.error("NSWorkspace refused to open temporary SSH script")
+        }
+        return opened
+    }
+
+    private static func openScript(_ scriptURL: URL, withApplicationAt appURL: URL) {
+        let cfg = NSWorkspace.OpenConfiguration()
+        cfg.activates = true
+        NSWorkspace.shared.open([scriptURL], withApplicationAt: appURL, configuration: cfg) { _, error in
+            guard let error else { return }
+            logger.error("Fallback iTerm2 file-open failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private static func terminalAutomationIssue(from error: NSDictionary?) -> TerminalLaunchIssue {
+        let code = (error?[NSAppleScript.errorNumber] as? NSNumber)?.intValue ?? 0
+        let brief = (error?[NSAppleScript.errorBriefMessage] as? String)
+            ?? (error?[NSAppleScript.errorMessage] as? String)
+
+        let message: String
+        switch code {
+        case -1743, -10004:
+            message = "ServerPulse isn't allowed to control iTerm2. Enable ServerPulse in System Settings > Privacy & Security > Automation. A file-open fallback was attempted."
+        case -600, -609:
+            message = "iTerm2 didn't respond to the automation request. Reopen iTerm2 and try again. A file-open fallback was attempted."
+        default:
+            if let brief, !brief.isEmpty {
+                message = "iTerm2 automation failed: \(brief). A file-open fallback was attempted."
+            } else {
+                message = "iTerm2 automation failed. A file-open fallback was attempted. Check Console for details."
+            }
+        }
+
+        return .warning(message)
     }
 
     private static func shellQuote(_ s: String) -> String {
@@ -57,7 +193,7 @@ enum TerminalLauncher {
             try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
             return dir
         } catch {
-            print("Failed to prepare temporary SSH script directory: \(error)")
+            logger.error("Failed to prepare temporary SSH script directory: \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }
