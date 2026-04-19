@@ -110,7 +110,13 @@ struct PopoverRootView: View {
                 headerButton("terminal.fill") {
                     if let config = appEnv.selectedServer {
                         presentTerminalLaunchIssue(
-                            TerminalLauncher.openSSH(config: config, terminalApp: appEnv.settings.terminalApp)
+                            TerminalLauncher.openSSH(
+                                config: config,
+                                terminalApp: appEnv.settings.terminalApp,
+                                onDeferredIssue: { issue in
+                                    presentTerminalLaunchIssue(issue)
+                                }
+                            )
                         )
                     }
                 }

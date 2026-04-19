@@ -25,7 +25,11 @@ enum TerminalLauncher {
     private static let logger = Logger(subsystem: "ServerPulse", category: "TerminalLauncher")
 
     @discardableResult
-    static func openSSH(config: ServerConfig, terminalApp: String) -> TerminalLaunchIssue? {
+    static func openSSH(
+        config: ServerConfig,
+        terminalApp: String,
+        onDeferredIssue: @escaping @MainActor (TerminalLaunchIssue) -> Void = { _ in }
+    ) -> TerminalLaunchIssue? {
         guard !config.sshHost.isEmpty, !config.sshUser.isEmpty else {
             let issue = TerminalLaunchIssue.error("SSH host and user are required before opening a terminal session.")
             logger.error("\(issue.message, privacy: .public)")
@@ -40,10 +44,10 @@ enum TerminalLauncher {
                 guard let scriptURL = createScript(command: command) else {
                     return TerminalLaunchIssue.error("iTerm2 wasn't found, and ServerPulse couldn't create the fallback SSH launcher.")
                 }
+                defer { scheduleCleanup(for: scriptURL) }
                 guard openScript(scriptURL) else {
                     return TerminalLaunchIssue.error("iTerm2 wasn't found, and macOS refused to open the fallback SSH launcher.")
                 }
-                scheduleCleanup(for: scriptURL)
                 return TerminalLaunchIssue.warning("iTerm2 wasn't found. Opened the SSH script with the default terminal app instead.")
             }
 
@@ -55,17 +59,24 @@ enum TerminalLauncher {
             guard let scriptURL = createScript(command: command) else {
                 return TerminalLaunchIssue.error("ServerPulse couldn't create the fallback SSH launcher after the iTerm2 automation request failed.")
             }
-            openScript(scriptURL, withApplicationAt: appURL)
-            scheduleCleanup(for: scriptURL)
+            defer { scheduleCleanup(for: scriptURL) }
+            openScript(scriptURL, withApplicationAt: appURL) { error in
+                guard let error else { return }
+                onDeferredIssue(
+                    .error(
+                        "iTerm2 automation failed, and ServerPulse couldn't open the fallback SSH launcher: \(error.localizedDescription)"
+                    )
+                )
+            }
             return terminalAutomationIssue(from: automationError)
         default:
             guard let scriptURL = createScript(command: command) else {
                 return TerminalLaunchIssue.error("ServerPulse couldn't create the temporary SSH launcher. Check Console for details.")
             }
+            defer { scheduleCleanup(for: scriptURL) }
             guard openScript(scriptURL) else {
                 return TerminalLaunchIssue.error("macOS refused to open the temporary SSH launcher. Check Console for details.")
             }
-            scheduleCleanup(for: scriptURL)
             return nil
         }
     }
@@ -151,12 +162,20 @@ enum TerminalLauncher {
         return opened
     }
 
-    private static func openScript(_ scriptURL: URL, withApplicationAt appURL: URL) {
+    private static func openScript(
+        _ scriptURL: URL,
+        withApplicationAt appURL: URL,
+        completion: @escaping @MainActor (Error?) -> Void = { _ in }
+    ) {
         let cfg = NSWorkspace.OpenConfiguration()
         cfg.activates = true
         NSWorkspace.shared.open([scriptURL], withApplicationAt: appURL, configuration: cfg) { _, error in
-            guard let error else { return }
-            logger.error("Fallback iTerm2 file-open failed: \(error.localizedDescription, privacy: .public)")
+            if let error {
+                logger.error("Fallback iTerm2 file-open failed: \(error.localizedDescription, privacy: .public)")
+            }
+            Task { @MainActor in
+                completion(error)
+            }
         }
     }
 
