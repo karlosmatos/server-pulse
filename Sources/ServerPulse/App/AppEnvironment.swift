@@ -24,6 +24,9 @@ final class AppEnvironment {
     private(set) var serverStates: [UUID: ServerState] = [:]
     private var pollingServices: [UUID: PollingService] = [:]
     private var pollingTasks: [UUID: Task<Void, Never>] = [:]
+    private var refreshingServerIDs = Set<UUID>()
+    private var pendingRefreshServerIDs = Set<UUID>()
+    private var forcedHeavyRefreshServerIDs = Set<UUID>()
     private var didRequestNotificationPermission = false
     private let pollingServiceFactory: (ServerConfig) -> PollingService
     private let notificationPermissionRequester: @Sendable () async -> Void
@@ -123,6 +126,7 @@ final class AppEnvironment {
     func refreshNow() {
         guard let id = selectedServerID,
               let serviceID = pollingServices[id]?.instanceID else { return }
+        forcedHeavyRefreshServerIDs.insert(id)
         Task { [weak self] in
             await self?.refreshServer(id: id, expectedServiceID: serviceID)
         }
@@ -180,24 +184,41 @@ final class AppEnvironment {
 
     private func refreshServer(id: UUID, expectedServiceID: UUID) async {
         guard let service = pollingServices[id], service.instanceID == expectedServiceID else { return }
+        guard !refreshingServerIDs.contains(id) else {
+            pendingRefreshServerIDs.insert(id)
+            return
+        }
+
+        refreshingServerIDs.insert(id)
+        defer {
+            refreshingServerIDs.remove(id)
+        }
 
         if id == selectedServerID { isLoading = true }
         serverStates[id]?.isLoading = true
 
-        let result = await service.poll()
+        let includeHeavyData = forcedHeavyRefreshServerIDs.remove(id) != nil || shouldRefreshHeavyData(for: id)
+        let result = await service.poll(includeHeavyData: includeHeavyData)
 
         guard !Task.isCancelled,
               let activeService = pollingServices[id],
-              activeService.instanceID == expectedServiceID else { return }
+              activeService.instanceID == expectedServiceID else {
+            serverStates[id]?.isLoading = false
+            if id == selectedServerID { isLoading = false }
+            return
+        }
 
         var state = serverStates[id] ?? ServerState()
         state.status = result.status
         state.stats = result.stats
         state.processes = result.processes
-        state.dockerContainers = result.dockerContainers
-        state.systemdServices = result.systemdServices
-        state.workflows = result.workflows
-        state.recentExecutions = result.recentExecutions
+        if result.didRefreshHeavyData {
+            state.dockerContainers = result.dockerContainers
+            state.systemdServices = result.systemdServices
+            state.workflows = result.workflows
+            state.recentExecutions = result.recentExecutions
+            state.lastHeavyRefresh = Date()
+        }
         state.lastUpdated = Date()
         state.errorMessage = result.errorMessage
         state.isLoading = false
@@ -205,6 +226,10 @@ final class AppEnvironment {
 
         if id == selectedServerID {
             projectSelectedServer()
+        }
+
+        if pendingRefreshServerIDs.remove(id) != nil {
+            await refreshServer(id: id, expectedServiceID: expectedServiceID)
         }
     }
 
@@ -233,6 +258,15 @@ final class AppEnvironment {
         lastUpdated = state.lastUpdated
         errorMessage = state.errorMessage
         isLoading = state.isLoading
+    }
+
+    private func shouldRefreshHeavyData(for id: UUID) -> Bool {
+        guard let config = servers.first(where: { $0.id == id }) else { return true }
+        guard let state = serverStates[id] else { return true }
+        guard let lastHeavyRefresh = state.lastHeavyRefresh else { return true }
+
+        let minimumHeavyRefreshInterval = max(60.0, config.pollingInterval)
+        return Date().timeIntervalSince(lastHeavyRefresh) >= minimumHeavyRefreshInterval
     }
 
     private func migrateIfNeeded() {

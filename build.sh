@@ -22,6 +22,14 @@ codesign --force --deep --sign "-" \
     --entitlements "Resources/ServerPulse.entitlements" \
     "$APP"
 
+INSTALLED="/Applications/ServerPulse.app"
+
+echo "Installing to $INSTALLED..."
+pkill -x ServerPulse 2>/dev/null || true
+sleep 0.5
+rm -rf "$INSTALLED"
+cp -R "$APP" "$INSTALLED"
+open "$INSTALLED"
+
 echo ""
-echo "Done! App bundle at: $APP"
-echo "Run with: open $APP"
+echo "Done! Installed and launched."

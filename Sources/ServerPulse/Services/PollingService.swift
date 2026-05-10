@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 struct PollResult {
     var status: ServerStatus = .unknown
@@ -9,13 +10,14 @@ struct PollResult {
     var workflows: [N8NWorkflow] = []
     var recentExecutions: [N8NExecution] = []
     var errorMessage: String?
+    var didRefreshHeavyData: Bool = false
 }
 
 struct PollingService {
+    private static let logger = Logger(subsystem: "ServerPulse", category: "Polling")
     let instanceID: UUID
     let config: ServerConfig
     let ssh: SSHClient
-    let ping: PingChecker
     let n8n: N8NClient
     let notifications: NotificationManager
     private let pollOverride: (() async -> PollResult)?
@@ -24,56 +26,58 @@ struct PollingService {
         self.instanceID = UUID()
         self.config = config
         self.ssh = SSHClient(config: config)
-        self.ping = PingChecker()
         self.n8n = N8NClient(config: config)
         self.notifications = NotificationManager(serverName: config.name, serverID: config.id)
         self.pollOverride = pollOverride
     }
 
-    func poll() async -> PollResult {
+    func poll(includeHeavyData: Bool = true) async -> PollResult {
         if let pollOverride {
             return await pollOverride()
         }
 
-        let psCommand = SSHCommandParser.processCommand(count: config.processCount, filter: config.processFilter)
         let baseURL = config.n8nBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let scheme = URL(string: baseURL)?.scheme?.lowercased()
-        let shouldPollN8N = !config.n8nAPIKey.isEmpty && (scheme == "http" || scheme == "https")
+        let hasN8NConfig = includeHeavyData && !config.n8nAPIKey.isEmpty && !baseURL.isEmpty
+        let shouldPollN8N = hasN8NConfig && scheme == "https"
+        let n8nConfigError = hasN8NConfig && scheme != "https" ? "n8n URL must start with https://" : nil
+        let snapshotCommand = SSHCommandParser.snapshotCommand(config: config, includeHeavyData: includeHeavyData)
 
-        // All I/O runs concurrently
-        async let reachable  = ping.isReachable(host: config.sshHost)
-        async let cpuOut     = try? ssh.run("top -bn1 | grep 'Cpu(s)'")
-        async let ramOut     = try? ssh.run("free -m | grep '^Mem'")
-        async let diskOut    = try? ssh.run("df -h / | tail -1")
-        async let psOut      = try? ssh.run(psCommand)
-        async let uptimeOut  = try? ssh.run("uptime")
-        async let dockerOut  = config.dockerEnabled
-            ? try? ssh.run("docker ps --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}' 2>/dev/null; echo '---'; docker stats --no-stream --format '{{.ID}}|{{.CPUPerc}}|{{.MemPerc}}|{{.MemUsage}}' 2>/dev/null")
-            : nil
-        async let systemdOut: String? = {
-            if let cmd = SSHCommandParser.systemdCommand(services: config.systemdServices) {
-                return try? await ssh.run(cmd)
-            }
-            return nil
-        }()
-        async let workflows: [N8NWorkflow]? = shouldPollN8N ? (try? n8n.fetchWorkflows()) : nil
-        async let executions: [N8NExecution]? = shouldPollN8N ? (try? n8n.fetchRecentExecutions()) : nil
+        let pollStart = ProcessInfo.processInfo.systemUptime
+        async let snapshotTimed = Self.measure { try? await ssh.run(snapshotCommand) }
+        async let workflowsTimed: ([N8NWorkflow]?, TimeInterval) = shouldPollN8N
+            ? Self.measure { try? await n8n.fetchWorkflows() }
+            : (nil, 0)
+        async let executionsTimed: ([N8NExecution]?, TimeInterval) = shouldPollN8N
+            ? Self.measure { try? await n8n.fetchRecentExecutions() }
+            : (nil, 0)
 
-        let (isUp, cpu, ram, disk, ps, uptime, docker, systemd, wf, exec) = await (
-            reachable, cpuOut, ramOut, diskOut, psOut, uptimeOut, dockerOut, systemdOut, workflows, executions
+        let ((snapshot, snapshotDuration), (wf, workflowsDuration), (exec, executionsDuration)) = await (
+            snapshotTimed,
+            workflowsTimed,
+            executionsTimed
         )
 
         var result = PollResult()
+        let sections = snapshot.map(SSHCommandParser.parseSnapshot(from:)) ?? [:]
+        let cpu = sections["CPU"]
+        let ram = sections["RAM"]
+        let disk = sections["DISK"]
+        let ps = sections["PROCESS"]
+        let uptime = sections["UPTIME"]
+        let docker = sections["DOCKER"]
+        let systemd = sections["SYSTEMD"]
 
         // Derive status
-        if !isUp {
-            result.status = .offline
-            result.errorMessage = "Unreachable (ping failed)"
-        } else if cpu == nil && ram == nil {
-            result.status = .degraded
-            result.errorMessage = "SSH connection failed"
+        if snapshot == nil {
+            let isReachable = await PingChecker().isReachable(host: config.sshHost)
+            result.status = isReachable ? .degraded : .offline
+            result.errorMessage = isReachable ? "SSH connection failed" : "Unreachable (ping failed)"
         } else {
             result.status = .online
+        }
+        if result.errorMessage == nil {
+            result.errorMessage = n8nConfigError
         }
 
         // Parse stats
@@ -95,8 +99,37 @@ struct PollingService {
         result.systemdServices  = systemd.map { SSHCommandParser.parseSystemdServices(from: $0) } ?? []
         result.workflows        = wf   ?? []
         result.recentExecutions = exec ?? []
+        result.didRefreshHeavyData = includeHeavyData
+
+        let totalDuration = ProcessInfo.processInfo.systemUptime - pollStart
+        logDiagnostics(
+            totalDuration: totalDuration,
+            snapshotDuration: snapshotDuration,
+            workflowsDuration: workflowsDuration,
+            executionsDuration: executionsDuration,
+            includeHeavyData: includeHeavyData
+        )
 
         await notifications.evaluate(result: result)
         return result
+    }
+
+    private func logDiagnostics(
+        totalDuration: TimeInterval,
+        snapshotDuration: TimeInterval,
+        workflowsDuration: TimeInterval,
+        executionsDuration: TimeInterval,
+        includeHeavyData: Bool
+    ) {
+        guard totalDuration >= 2 else { return }
+        Self.logger.notice(
+            "Slow poll for \(self.config.name, privacy: .public): total=\(totalDuration, format: .fixed(precision: 2))s snapshot=\(snapshotDuration, format: .fixed(precision: 2))s workflows=\(workflowsDuration, format: .fixed(precision: 2))s executions=\(executionsDuration, format: .fixed(precision: 2))s heavy=\(includeHeavyData, privacy: .public)"
+        )
+    }
+
+    private static func measure<T>(_ operation: () async -> T) async -> (T, TimeInterval) {
+        let start = ProcessInfo.processInfo.systemUptime
+        let value = await operation()
+        return (value, ProcessInfo.processInfo.systemUptime - start)
     }
 }
