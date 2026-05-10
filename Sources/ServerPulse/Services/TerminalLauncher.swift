@@ -35,7 +35,14 @@ enum TerminalLauncher {
             logger.error("\(issue.message, privacy: .public)")
             return issue
         }
-        let command = sshCommand(for: config)
+        let command: String
+        do {
+            command = try sshCommand(for: config)
+        } catch {
+            let message = error.localizedDescription
+            logger.error("\(message, privacy: .public)")
+            return TerminalLaunchIssue.error(message)
+        }
 
         switch terminalApp.lowercased() {
         case "iterm", "iterm2":
@@ -81,10 +88,12 @@ enum TerminalLauncher {
         }
     }
 
-    private static func sshCommand(for config: ServerConfig) -> String {
+    private static func sshCommand(for config: ServerConfig) throws -> String {
+        let destination = try SSHConfigValidator.destination(for: config)
         var args = ["ssh", "-i", shellQuote(config.resolvedKeyPath)]
         if config.sshPort != 22 { args += ["-p", String(config.sshPort)] }
-        args.append(shellQuote("\(config.sshUser)@\(config.sshHost)"))
+        args.append("--")
+        args.append(shellQuote(destination))
         return args.joined(separator: " ")
     }
 

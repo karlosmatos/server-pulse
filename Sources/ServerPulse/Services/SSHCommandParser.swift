@@ -1,6 +1,15 @@
 import Foundation
 
 enum SSHCommandParser {
+    private static let sectionOrder = [
+        "CPU",
+        "RAM",
+        "DISK",
+        "PROCESS",
+        "UPTIME",
+        "DOCKER",
+        "SYSTEMD",
+    ]
 
     static func parseCPU(from output: String) -> Double? {
         let line = output.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -46,16 +55,64 @@ enum SSHCommandParser {
     // MARK: - Process Command Builder
 
     static func processCommand(count: Int, filter: String) -> String {
+        let limitedCount = max(1, min(count, 50))
         let sanitized = filter.unicodeScalars.filter {
             CharacterSet.alphanumerics.contains($0) || CharacterSet(charactersIn: "-_.").contains($0)
         }
         let clean = String(sanitized)
 
         if clean.isEmpty {
-            return "ps aux --sort=-%cpu | tail -n +2 | head -\(max(1, min(count, 50)))"
+            return "ps aux --sort=-%cpu | tail -n +2 | head -\(limitedCount)"
         } else {
-            return "ps aux | grep -iF '\(clean)' | grep -v grep"
+            return "ps aux --sort=-%cpu | grep -iF '\(clean)' | grep -v grep | head -\(limitedCount)"
         }
+    }
+
+    static func snapshotCommand(config: ServerConfig, includeHeavyData: Bool) -> String {
+        var commands: [(String, String)] = [
+            ("CPU", "top -bn1 | grep 'Cpu(s)'"),
+            ("RAM", "free -m | grep '^Mem'"),
+            ("DISK", "df -h / | tail -1"),
+            ("PROCESS", processCommand(count: config.processCount, filter: config.processFilter)),
+            ("UPTIME", "uptime"),
+        ]
+
+        if includeHeavyData, config.dockerEnabled {
+            commands.append((
+                "DOCKER",
+                "docker ps --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}' 2>/dev/null | head -100; echo '---'; docker stats --no-stream --format '{{.ID}}|{{.CPUPerc}}|{{.MemPerc}}|{{.MemUsage}}' 2>/dev/null | head -100"
+            ))
+        }
+
+        if includeHeavyData, let systemd = systemdCommand(services: config.systemdServices) {
+            commands.append(("SYSTEMD", systemd))
+        }
+
+        return commands.map { section, command in
+            "printf '__SP_\(section)__\\n'; { \(command); } 2>/dev/null || true"
+        }.joined(separator: "; ")
+    }
+
+    static func parseSnapshot(from output: String) -> [String: String] {
+        var sections: [String: [String]] = [:]
+        var currentSection: String?
+
+        for line in output.split(separator: "\n", omittingEmptySubsequences: false) {
+            let text = String(line)
+            if let name = sectionName(from: text) {
+                currentSection = name
+                sections[name] = []
+                continue
+            }
+
+            guard let currentSection else { continue }
+            sections[currentSection, default: []].append(text)
+        }
+
+        return Dictionary(uniqueKeysWithValues: sectionOrder.compactMap { key in
+            guard let lines = sections[key] else { return nil }
+            return (key, lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines))
+        })
     }
 
     // MARK: - Docker Parsing
@@ -153,5 +210,10 @@ enum SSHCommandParser {
 
     private static func nonEmptyParts(_ text: String) -> [String] {
         text.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+    }
+
+    private static func sectionName(from line: String) -> String? {
+        guard line.hasPrefix("__SP_"), line.hasSuffix("__") else { return nil }
+        return String(line.dropFirst(5).dropLast(2))
     }
 }

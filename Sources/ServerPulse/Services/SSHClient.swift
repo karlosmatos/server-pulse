@@ -1,8 +1,10 @@
 import Foundation
+import Darwin
 
 enum SSHError: Error, LocalizedError {
     case timeout
     case commandFailed(code: Int32, stderr: String)
+    case outputTooLarge(limitBytes: Int)
 
     var errorDescription: String? {
         switch self {
@@ -10,18 +12,34 @@ enum SSHError: Error, LocalizedError {
             return "SSH connection timed out"
         case .commandFailed(let code, let stderr):
             return "SSH failed (exit \(code)): \(stderr.trimmingCharacters(in: .whitespacesAndNewlines))"
+        case .outputTooLarge(let limitBytes):
+            return "SSH output exceeded \(limitBytes) bytes"
         }
     }
 }
 
 struct SSHClient {
     let config: ServerConfig
+    private static let controlPath: String = {
+        let dir = prepareSSHDirectory()
+        return "\(dir.path)/sp_ctl_%C"
+    }()
 
     func run(_ command: String) async throws -> String {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-        let controlPath = "\(ensureSSHDirectory().path)/sp_ctl_%C"
+        let processHandle = SSHProcessHandle(process: process)
 
+        return try await withTaskCancellationHandler {
+            try await run(command, process: process, processHandle: processHandle)
+        } onCancel: {
+            processHandle.terminate(reason: .cancelled)
+        }
+    }
+
+    private func run(_ command: String, process: Process, processHandle: SSHProcessHandle) async throws -> String {
+        let destination = try SSHConfigValidator.destination(for: config)
+
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
         var args = [
             "-i", config.resolvedKeyPath,
             "-o", "BatchMode=yes",
@@ -30,13 +48,13 @@ struct SSHClient {
             "-o", "ServerAliveInterval=30",
             "-o", "ServerAliveCountMax=2",
             "-o", "ControlMaster=auto",
-            "-o", "ControlPath=\(controlPath)",
+            "-o", "ControlPath=\(Self.controlPath)",
             "-o", "ControlPersist=120",
         ]
         if config.sshPort != 22 {
             args += ["-p", String(config.sshPort)]
         }
-        args += ["\(config.sshUser)@\(config.sshHost)", command]
+        args += ["--", destination, command]
         process.arguments = args
 
         let stdout = Pipe()
@@ -44,38 +62,72 @@ struct SSHClient {
         process.standardOutput = stdout
         process.standardError = stderr
 
-        return try await withCheckedThrowingContinuation { continuation in
-            do {
-                try process.run()
-            } catch {
-                continuation.resume(throwing: error)
-                return
+        let termination = TerminationState()
+        let timeout = DispatchWorkItem {
+            processHandle.terminate(reason: .timeout)
+        }
+        process.terminationHandler = { proc in
+            timeout.cancel()
+            switch processHandle.terminationReason {
+            case .cancelled:
+                termination.finish(with: .failure(CancellationError()))
+            case .outputLimit:
+                termination.finish(with: .failure(SSHError.outputTooLarge(limitBytes: Self.outputLimitBytes)))
+            case .timeout:
+                termination.finish(with: .failure(SSHError.timeout))
+            case nil:
+                termination.finish(with: .success(proc.terminationStatus))
             }
+        }
 
-            let gate = ContinuationGate(continuation)
+        try Task.checkCancellation()
+        try process.run()
+        processHandle.markStarted()
+        DispatchQueue.global().asyncAfter(deadline: .now() + 15, execute: timeout)
 
-            let timeout = DispatchWorkItem {
-                process.terminate()
-                Task { await gate.resume(with: .failure(SSHError.timeout)) }
-            }
-            DispatchQueue.global().asyncAfter(deadline: .now() + 15, execute: timeout)
+        let stdoutTask = Task.detached {
+            try ProcessOutputReader.read(
+                from: stdout.fileHandleForReading,
+                limit: Self.outputLimitBytes,
+                processHandle: processHandle
+            )
+        }
+        let stderrTask = Task.detached {
+            try ProcessOutputReader.read(
+                from: stderr.fileHandleForReading,
+                limit: Self.outputLimitBytes,
+                processHandle: processHandle
+            )
+        }
 
-            process.terminationHandler = { proc in
-                timeout.cancel()
-                let outData = stdout.fileHandleForReading.readDataToEndOfFile()
-                let output = String(data: outData, encoding: .utf8) ?? ""
-                if proc.terminationStatus == 0 {
-                    Task { await gate.resume(with: .success(output)) }
-                } else {
-                    let errData = stderr.fileHandleForReading.readDataToEndOfFile()
-                    let errMsg = String(data: errData, encoding: .utf8) ?? ""
-                    Task { await gate.resume(with: .failure(SSHError.commandFailed(code: proc.terminationStatus, stderr: errMsg))) }
+        let status = try await termination.wait()
+        let output = try await stdoutTask.value
+        let errMsg = try await stderrTask.value
+        if status == 0 {
+            return output
+        }
+        throw SSHError.commandFailed(code: status, stderr: errMsg)
+    }
+
+    private static let outputLimitBytes = 1_048_576
+
+    private enum ProcessOutputReader {
+        static func read(from fileHandle: FileHandle, limit: Int, processHandle: SSHProcessHandle) throws -> String {
+            var data = Data()
+            while true {
+                let chunk = try fileHandle.read(upToCount: 16 * 1_024) ?? Data()
+                guard !chunk.isEmpty else { break }
+                guard data.count + chunk.count <= limit else {
+                    processHandle.terminate(reason: .outputLimit)
+                    throw SSHError.outputTooLarge(limitBytes: limit)
                 }
+                data.append(chunk)
             }
+            return String(decoding: data, as: UTF8.self)
         }
     }
 
-    private func ensureSSHDirectory() -> URL {
+    private static func prepareSSHDirectory() -> URL {
         let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ssh", isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -87,20 +139,105 @@ struct SSHClient {
     }
 }
 
-actor ContinuationGate {
-    private var fired = false
-    private let continuation: CheckedContinuation<String, Error>
+private enum SSHProcessTerminationReason {
+    case cancelled
+    case outputLimit
+    case timeout
+}
 
-    init(_ continuation: CheckedContinuation<String, Error>) {
-        self.continuation = continuation
+private final class SSHProcessHandle: @unchecked Sendable {
+    private let process: Process
+    private let lock = NSLock()
+    private var started = false
+    private var reason: SSHProcessTerminationReason?
+
+    init(process: Process) {
+        self.process = process
     }
 
-    func resume(with result: Result<String, Error>) {
-        guard !fired else { return }
-        fired = true
+    var terminationReason: SSHProcessTerminationReason? {
+        lock.lock()
+        defer { lock.unlock() }
+        return reason
+    }
+
+    func markStarted() {
+        lock.lock()
+        started = true
+        let shouldTerminate = reason != nil && process.isRunning
+        lock.unlock()
+
+        guard shouldTerminate else { return }
+        terminateRunningProcess()
+    }
+
+    func terminate(reason newReason: SSHProcessTerminationReason) {
+        lock.lock()
+        if reason == nil {
+            reason = newReason
+        }
+        let shouldTerminate = started && process.isRunning
+        lock.unlock()
+
+        guard shouldTerminate else { return }
+        terminateRunningProcess()
+    }
+
+    private func terminateRunningProcess() {
+        process.terminate()
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2) { [process] in
+            guard process.isRunning else { return }
+            kill(process.processIdentifier, SIGKILL)
+        }
+    }
+}
+
+private final class TerminationState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var result: Result<Int32, Error>?
+    private var continuation: CheckedContinuation<Int32, Error>?
+
+    func wait() async throws -> Int32 {
+        try await withCheckedThrowingContinuation { continuation in
+            let resultToResume: Result<Int32, Error>?
+            lock.lock()
+            if let result {
+                resultToResume = result
+            } else {
+                self.continuation = continuation
+                resultToResume = nil
+            }
+            lock.unlock()
+
+            if let resultToResume {
+                resume(continuation, with: resultToResume)
+            }
+        }
+    }
+
+    func finish(with result: Result<Int32, Error>) {
+        let continuationToResume: CheckedContinuation<Int32, Error>?
+        lock.lock()
+        guard self.result == nil else {
+            lock.unlock()
+            return
+        }
+        self.result = result
+        continuationToResume = continuation
+        continuation = nil
+        lock.unlock()
+
+        if let continuationToResume {
+            resume(continuationToResume, with: result)
+        }
+    }
+
+    private func resume(_ continuation: CheckedContinuation<Int32, Error>, with result: Result<Int32, Error>) {
         switch result {
-        case .success(let out): continuation.resume(returning: out)
-        case .failure(let err): continuation.resume(throwing: err)
+        case .success(let status):
+            continuation.resume(returning: status)
+        case .failure(let error):
+            continuation.resume(throwing: error)
         }
     }
 }

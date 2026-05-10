@@ -58,7 +58,7 @@ struct ServerEditView: View {
 
                 SectionCard(icon: "flowchart", title: "n8n API", tint: .orange) {
                     VStack(spacing: 10) {
-                        field("Base URL", $n8nBaseURL, "http://host:5678")
+                        field("Base URL", $n8nBaseURL, "https://host:5678")
                         HStack(spacing: 8) {
                             Text("API Key").font(.caption).foregroundStyle(.secondary).frame(width: 56, alignment: .trailing)
                             SecureField("Paste n8n API key", text: $n8nAPIKey).textFieldStyle(.roundedBorder).font(.caption)

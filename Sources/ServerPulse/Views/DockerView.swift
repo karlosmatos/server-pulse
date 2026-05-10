@@ -5,12 +5,14 @@ struct DockerView: View {
     @Environment(AppEnvironment.self) private var appEnv
 
     private var containers: [DockerContainer] { appEnv.dockerContainers }
+    private var runningCount: Int { containers.reduce(into: 0) { $0 += $1.isRunning ? 1 : 0 } }
+    private var stoppedCount: Int { containers.count - runningCount }
 
     var body: some View {
         SectionCard(icon: "shippingbox", title: "Docker", tint: .cyan) {
             HStack(spacing: 6) {
-                CountBadge(count: containers.filter(\.isRunning).count, color: .green)
-                CountBadge(count: containers.filter { !$0.isRunning }.count, color: .gray)
+                CountBadge(count: runningCount, color: .green)
+                CountBadge(count: stoppedCount, color: .gray)
             }
         } content: {
             VStack(spacing: 6) {

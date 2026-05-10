@@ -10,7 +10,7 @@ enum N8NError: Error, LocalizedError {
         switch self {
         case .missingAPIKey:   return "n8n API key not configured"
         case .invalidURL:      return "Invalid n8n URL"
-        case .invalidScheme:   return "n8n URL must start with http:// or https://"
+        case .invalidScheme:   return "n8n URL must start with https://"
         case .httpError(let c): return "n8n HTTP \(c)"
         }
     }
@@ -43,7 +43,7 @@ struct N8NClient {
             throw N8NError.invalidScheme
         }
 
-        guard scheme == "http" || scheme == "https" else {
+        guard scheme == "https" else {
             throw N8NError.invalidScheme
         }
         guard let url = URL(string: base + path) else { throw N8NError.invalidURL }

@@ -10,11 +10,38 @@ final class ServerPulseTests: XCTestCase {
         let cmd = SSHCommandParser.processCommand(count: 10, filter: "nginx; rm -rf /")
         XCTAssertFalse(cmd.contains(";"))
         XCTAssertTrue(cmd.contains("grep -iF 'nginxrm-rf'"))
+        XCTAssertTrue(cmd.contains("head -10"))
     }
 
     func testSystemdCommandRejectsUnsafeServiceName() {
         let cmd = SSHCommandParser.systemdCommand(services: "nginx,postgresql;reboot")
         XCTAssertEqual(cmd, "for s in nginx; do echo \"$s:$(systemctl is-active $s)\"; done")
+    }
+
+    func testSSHConfigValidatorRejectsOptionLikeHostAndUser() {
+        var config = makeServer(id: UUID(), key: "")
+        config.sshHost = "-oProxyCommand=touch/tmp/pwned"
+        XCTAssertThrowsError(try SSHConfigValidator.destination(for: config)) { error in
+            XCTAssertEqual(error as? SSHConfigError, .invalidHost)
+        }
+
+        config.sshHost = "127.0.0.1"
+        config.sshUser = "-lroot"
+        XCTAssertThrowsError(try SSHConfigValidator.destination(for: config)) { error in
+            XCTAssertEqual(error as? SSHConfigError, .invalidUser)
+        }
+    }
+
+    func testSSHConfigValidatorBuildsSafeDestination() throws {
+        let config = ServerConfig(
+            name: "Test",
+            sshHost: "server-01.example.com",
+            sshUser: "deploy_user",
+            sshKeyPath: "",
+            sshPort: 22
+        )
+
+        XCTAssertEqual(try SSHConfigValidator.destination(for: config), "deploy_user@server-01.example.com")
     }
 
     func testParseDockerOutputParsesPsAndStatsSections() {
@@ -32,12 +59,70 @@ final class ServerPulseTests: XCTestCase {
         XCTAssertEqual(parsed[0].memPercent, 40.0)
     }
 
+    func testParseSnapshotExtractsSectionBodies() {
+        let output = """
+        __SP_CPU__
+        cpu line
+        __SP_PROCESS__
+        proc 1
+        proc 2
+        __SP_DOCKER__
+        docker line
+        ---
+        stats line
+        """
+
+        let parsed = SSHCommandParser.parseSnapshot(from: output)
+        XCTAssertEqual(parsed["CPU"], "cpu line")
+        XCTAssertEqual(parsed["PROCESS"], "proc 1\nproc 2")
+        XCTAssertEqual(parsed["DOCKER"], "docker line\n---\nstats line")
+    }
+
+    func testSnapshotCommandSkipsHeavySectionsWhenDisabled() {
+        let config = ServerConfig(
+            name: "Test",
+            sshHost: "127.0.0.1",
+            sshUser: "root",
+            dockerEnabled: true,
+            systemdServices: "nginx"
+        )
+
+        let command = SSHCommandParser.snapshotCommand(config: config, includeHeavyData: false)
+        XCTAssertFalse(command.contains("__SP_DOCKER__"))
+        XCTAssertFalse(command.contains("__SP_SYSTEMD__"))
+        XCTAssertTrue(command.contains("__SP_PROCESS__"))
+    }
+
     func testN8NClientRejectsInvalidScheme() async {
         let config = ServerConfig(
             name: "Test",
             sshHost: "127.0.0.1",
             sshUser: "root",
             n8nBaseURL: "example.com",
+            n8nAPIKey: "abc"
+        )
+
+        let client = N8NClient(config: config)
+
+        do {
+            _ = try await client.fetchWorkflows()
+            XCTFail("Expected invalidScheme error")
+        } catch let error as N8NError {
+            guard case .invalidScheme = error else {
+                XCTFail("Expected invalidScheme, got \(error)")
+                return
+            }
+        } catch {
+            XCTFail("Expected N8NError.invalidScheme, got \(error)")
+        }
+    }
+
+    func testN8NClientRejectsPlainHTTP() async {
+        let config = ServerConfig(
+            name: "Test",
+            sshHost: "127.0.0.1",
+            sshUser: "root",
+            n8nBaseURL: "http://n8n.local",
             n8nAPIKey: "abc"
         )
 

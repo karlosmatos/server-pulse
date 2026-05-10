@@ -7,12 +7,16 @@ struct N8NView: View {
 
     private var workflows: [N8NWorkflow] { appEnv.workflows }
     private var limit: Int { 5 }
+    private var activeCount: Int { workflows.reduce(into: 0) { $0 += $1.active ? 1 : 0 } }
+    private var inactiveCount: Int { workflows.count - activeCount }
+    private var visibleWorkflows: [N8NWorkflow] { expanded ? workflows : Array(workflows.prefix(limit)) }
+    private var recentExecutions: ArraySlice<N8NExecution> { appEnv.recentExecutions.prefix(5) }
 
     var body: some View {
         SectionCard(icon: "flowchart", title: "n8n", tint: .orange) {
             HStack(spacing: 6) {
-                CountBadge(count: workflows.filter(\.active).count, color: .green)
-                CountBadge(count: workflows.filter { !$0.active }.count, color: .gray)
+                CountBadge(count: activeCount, color: .green)
+                CountBadge(count: inactiveCount, color: .gray)
             }
         } content: {
             if workflows.isEmpty && appEnv.recentExecutions.isEmpty {
@@ -37,8 +41,7 @@ struct N8NView: View {
     @ViewBuilder
     private var workflowSection: some View {
         if !workflows.isEmpty {
-            let visible = expanded ? workflows : Array(workflows.prefix(limit))
-            ForEach(visible) { wf in WorkflowRow(workflow: wf) }
+            ForEach(visibleWorkflows) { wf in WorkflowRow(workflow: wf) }
 
             if workflows.count > limit {
                 Button {
@@ -66,7 +69,7 @@ struct N8NView: View {
                 Text("Recent").font(.caption).foregroundStyle(.secondary).fontWeight(.medium)
             }
 
-            ForEach(appEnv.recentExecutions.prefix(5)) { exec in ExecutionRow(execution: exec) }
+            ForEach(recentExecutions) { exec in ExecutionRow(execution: exec) }
         }
     }
 }

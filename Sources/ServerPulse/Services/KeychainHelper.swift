@@ -17,6 +17,7 @@ enum KeychainHelper {
         guard !value.isEmpty else { return true }
         var attributes = query
         attributes[kSecValueData] = Data(value.utf8)
+        attributes[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         let addStatus = SecItemAdd(attributes as CFDictionary, nil)
         guard addStatus == errSecSuccess else {
             print("Keychain add failed (\(addStatus)): \(message(for: addStatus))")
