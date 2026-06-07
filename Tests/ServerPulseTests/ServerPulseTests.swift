@@ -1,3 +1,7 @@
+#if !canImport(Testing)
+#error("ServerPulseTests require Swift 6.0+ or Xcode Command Line Tools 16+ because they use Swift Testing.")
+#endif
+
 import Testing
 import Foundation
 @testable import ServerPulse
