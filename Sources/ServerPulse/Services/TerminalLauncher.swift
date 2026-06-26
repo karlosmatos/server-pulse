@@ -46,36 +46,28 @@ enum TerminalLauncher {
 
         switch terminalApp.lowercased() {
         case "iterm", "iterm2":
+            guard let scriptURL = createScript(command: command) else {
+                return TerminalLaunchIssue.error("ServerPulse couldn't create the temporary SSH launcher. Check Console for details.")
+            }
+            defer { scheduleCleanup(for: scriptURL) }
+
             guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.googlecode.iterm2") else {
                 logger.error("iTerm2 bundle identifier could not be resolved")
-                guard let scriptURL = createScript(command: command) else {
-                    return TerminalLaunchIssue.error("iTerm2 wasn't found, and ServerPulse couldn't create the fallback SSH launcher.")
-                }
-                defer { scheduleCleanup(for: scriptURL) }
                 guard openScript(scriptURL) else {
-                    return TerminalLaunchIssue.error("iTerm2 wasn't found, and macOS refused to open the fallback SSH launcher.")
+                    return TerminalLaunchIssue.error("iTerm2 wasn't found, and macOS refused to open the SSH launcher.")
                 }
                 return TerminalLaunchIssue.warning("iTerm2 wasn't found. Opened the SSH script with the default terminal app instead.")
             }
 
-            let automationError = openInITerm(command: command)
-            if automationError == nil {
-                return nil
-            }
-
-            guard let scriptURL = createScript(command: command) else {
-                return TerminalLaunchIssue.error("ServerPulse couldn't create the fallback SSH launcher after the iTerm2 automation request failed.")
-            }
-            defer { scheduleCleanup(for: scriptURL) }
             openScript(scriptURL, withApplicationAt: appURL) { error in
                 guard let error else { return }
                 onDeferredIssue(
                     .error(
-                        "iTerm2 automation failed, and ServerPulse couldn't open the fallback SSH launcher: \(error.localizedDescription)"
+                        "ServerPulse couldn't open the SSH launcher in iTerm2: \(error.localizedDescription)"
                     )
                 )
             }
-            return terminalAutomationIssue(from: automationError)
+            return nil
         default:
             guard let scriptURL = createScript(command: command) else {
                 return TerminalLaunchIssue.error("ServerPulse couldn't create the temporary SSH launcher. Check Console for details.")
@@ -122,44 +114,10 @@ enum TerminalLauncher {
         return scriptURL
     }
 
-    private static func openInITerm(command: String) -> NSDictionary? {
-        let scriptSource = """
-        tell application "iTerm2"
-            activate
-            if (count of windows) = 0 then
-                create window with default profile command "\(appleScriptQuote(command))"
-            else
-                tell current window
-                    create tab with default profile command "\(appleScriptQuote(command))"
-                end tell
-            end if
-        end tell
-        """
-
-        var error: NSDictionary?
-        let script = NSAppleScript(source: scriptSource)
-        let result = script?.executeAndReturnError(&error)
-        guard result != nil else {
-            let code = (error?[NSAppleScript.errorNumber] as? NSNumber)?.intValue ?? 0
-            let brief = (error?[NSAppleScript.errorBriefMessage] as? String)
-                ?? (error?[NSAppleScript.errorMessage] as? String)
-                ?? "Unknown AppleScript error"
-            logger.error("Failed to launch iTerm2 via AppleScript (\(code)): \(brief, privacy: .public)")
-            return error
-        }
-        return nil
-    }
-
     private static func scheduleCleanup(for scriptURL: URL, after seconds: TimeInterval = 60) {
         DispatchQueue.global().asyncAfter(deadline: .now() + seconds) {
             try? FileManager.default.removeItem(at: scriptURL)
         }
-    }
-
-    private static func appleScriptQuote(_ s: String) -> String {
-        s
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
     }
 
     @discardableResult
@@ -180,34 +138,12 @@ enum TerminalLauncher {
         cfg.activates = true
         NSWorkspace.shared.open([scriptURL], withApplicationAt: appURL, configuration: cfg) { _, error in
             if let error {
-                logger.error("Fallback iTerm2 file-open failed: \(error.localizedDescription, privacy: .public)")
+                logger.error("iTerm2 file-open failed: \(error.localizedDescription, privacy: .public)")
             }
             Task { @MainActor in
                 completion(error)
             }
         }
-    }
-
-    private static func terminalAutomationIssue(from error: NSDictionary?) -> TerminalLaunchIssue {
-        let code = (error?[NSAppleScript.errorNumber] as? NSNumber)?.intValue ?? 0
-        let brief = (error?[NSAppleScript.errorBriefMessage] as? String)
-            ?? (error?[NSAppleScript.errorMessage] as? String)
-
-        let message: String
-        switch code {
-        case -1743, -10004:
-            message = "ServerPulse isn't allowed to control iTerm2. Enable ServerPulse in System Settings > Privacy & Security > Automation. A file-open fallback was attempted."
-        case -600, -609:
-            message = "iTerm2 didn't respond to the automation request. Reopen iTerm2 and try again. A file-open fallback was attempted."
-        default:
-            if let brief, !brief.isEmpty {
-                message = "iTerm2 automation failed: \(brief). A file-open fallback was attempted."
-            } else {
-                message = "iTerm2 automation failed. A file-open fallback was attempted. Check Console for details."
-            }
-        }
-
-        return .warning(message)
     }
 
     private static func shellQuote(_ s: String) -> String {
