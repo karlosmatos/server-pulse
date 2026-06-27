@@ -44,6 +44,13 @@ final class ServerPulseTests: XCTestCase {
         XCTAssertEqual(try SSHConfigValidator.destination(for: config), "deploy_user@server-01.example.com")
     }
 
+    func testTerminalLauncherDisplayNamesIncludeCmux() {
+        XCTAssertEqual(TerminalLauncher.displayName(for: "terminal"), "Terminal.app")
+        XCTAssertEqual(TerminalLauncher.displayName(for: "iterm2"), "iTerm2")
+        XCTAssertEqual(TerminalLauncher.displayName(for: "cmux"), "cmux")
+        XCTAssertEqual(TerminalLauncher.displayName(for: "unknown"), "Terminal.app")
+    }
+
     func testParseDockerOutputParsesPsAndStatsSections() {
         let output = """
         c1|web|nginx:latest|Up 2 hours

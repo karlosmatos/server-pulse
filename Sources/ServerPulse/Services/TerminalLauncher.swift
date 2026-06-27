@@ -24,6 +24,17 @@ struct TerminalLaunchIssue: Identifiable {
 enum TerminalLauncher {
     private static let logger = Logger(subsystem: "ServerPulse", category: "TerminalLauncher")
 
+    static func displayName(for terminalApp: String) -> String {
+        switch terminalApp.lowercased() {
+        case "iterm", "iterm2":
+            return "iTerm2"
+        case "cmux":
+            return "cmux"
+        default:
+            return "Terminal.app"
+        }
+    }
+
     @discardableResult
     static func openSSH(
         config: ServerConfig,
@@ -46,28 +57,19 @@ enum TerminalLauncher {
 
         switch terminalApp.lowercased() {
         case "iterm", "iterm2":
-            guard let scriptURL = createScript(command: command) else {
-                return TerminalLaunchIssue.error("ServerPulse couldn't create the temporary SSH launcher. Check Console for details.")
-            }
-            defer { scheduleCleanup(for: scriptURL) }
-
-            guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.googlecode.iterm2") else {
-                logger.error("iTerm2 bundle identifier could not be resolved")
-                guard openScript(scriptURL) else {
-                    return TerminalLaunchIssue.error("iTerm2 wasn't found, and macOS refused to open the SSH launcher.")
-                }
-                return TerminalLaunchIssue.warning("iTerm2 wasn't found. Opened the SSH script with the default terminal app instead.")
-            }
-
-            openScript(scriptURL, withApplicationAt: appURL) { error in
-                guard let error else { return }
-                onDeferredIssue(
-                    .error(
-                        "ServerPulse couldn't open the SSH launcher in iTerm2: \(error.localizedDescription)"
-                    )
-                )
-            }
-            return nil
+            return openSSHScript(
+                command: command,
+                appName: "iTerm2",
+                bundleIdentifier: "com.googlecode.iterm2",
+                onDeferredIssue: onDeferredIssue
+            )
+        case "cmux":
+            return openSSHScript(
+                command: command,
+                appName: "cmux",
+                bundleIdentifier: "com.cmuxterm.app",
+                onDeferredIssue: onDeferredIssue
+            )
         default:
             guard let scriptURL = createScript(command: command) else {
                 return TerminalLaunchIssue.error("ServerPulse couldn't create the temporary SSH launcher. Check Console for details.")
@@ -78,6 +80,36 @@ enum TerminalLauncher {
             }
             return nil
         }
+    }
+
+    private static func openSSHScript(
+        command: String,
+        appName: String,
+        bundleIdentifier: String,
+        onDeferredIssue: @escaping @MainActor (TerminalLaunchIssue) -> Void
+    ) -> TerminalLaunchIssue? {
+        guard let scriptURL = createScript(command: command) else {
+            return TerminalLaunchIssue.error("ServerPulse couldn't create the temporary SSH launcher. Check Console for details.")
+        }
+        defer { scheduleCleanup(for: scriptURL) }
+
+        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) else {
+            logger.error("\(appName, privacy: .public) bundle identifier could not be resolved")
+            guard openScript(scriptURL) else {
+                return TerminalLaunchIssue.error("\(appName) wasn't found, and macOS refused to open the SSH launcher.")
+            }
+            return TerminalLaunchIssue.warning("\(appName) wasn't found. Opened the SSH script with the default terminal app instead.")
+        }
+
+        openScript(scriptURL, withApplicationAt: appURL, appName: appName) { error in
+            guard let error else { return }
+            onDeferredIssue(
+                .error(
+                    "ServerPulse couldn't open the SSH launcher in \(appName): \(error.localizedDescription)"
+                )
+            )
+        }
+        return nil
     }
 
     private static func sshCommand(for config: ServerConfig) throws -> String {
@@ -132,13 +164,14 @@ enum TerminalLauncher {
     private static func openScript(
         _ scriptURL: URL,
         withApplicationAt appURL: URL,
+        appName: String,
         completion: @escaping @MainActor (Error?) -> Void = { _ in }
     ) {
         let cfg = NSWorkspace.OpenConfiguration()
         cfg.activates = true
         NSWorkspace.shared.open([scriptURL], withApplicationAt: appURL, configuration: cfg) { _, error in
             if let error {
-                logger.error("iTerm2 file-open failed: \(error.localizedDescription, privacy: .public)")
+                logger.error("\(appName, privacy: .public) file-open failed: \(error.localizedDescription, privacy: .public)")
             }
             Task { @MainActor in
                 completion(error)
