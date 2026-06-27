@@ -1,57 +1,27 @@
-import XCTest
+#if !canImport(Testing)
+#error("ServerPulseTests require Swift 6.0+ or Xcode Command Line Tools 16+ because they use Swift Testing.")
+#endif
+
+import Testing
+import Foundation
 @testable import ServerPulse
 
-final class ServerPulseTests: XCTestCase {
-    override func tearDown() {
-        super.tearDown()
-    }
+@Suite("SSHCommandParser")
+struct SSHCommandParserTests {
 
-    func testProcessCommandSanitizesUnsafeFilterCharacters() {
+    @Test func processCommandSanitizesUnsafeFilterCharacters() {
         let cmd = SSHCommandParser.processCommand(count: 10, filter: "nginx; rm -rf /")
-        XCTAssertFalse(cmd.contains(";"))
-        XCTAssertTrue(cmd.contains("grep -iF 'nginxrm-rf'"))
-        XCTAssertTrue(cmd.contains("head -10"))
+        #expect(!cmd.contains(";"))
+        #expect(cmd.contains("grep -iF 'nginxrm-rf'"))
+        #expect(cmd.contains("head -10"))
     }
 
-    func testSystemdCommandRejectsUnsafeServiceName() {
+    @Test func systemdCommandRejectsUnsafeServiceName() {
         let cmd = SSHCommandParser.systemdCommand(services: "nginx,postgresql;reboot")
-        XCTAssertEqual(cmd, "for s in nginx; do echo \"$s:$(systemctl is-active $s)\"; done")
+        #expect(cmd == "for s in nginx; do echo \"$s:$(systemctl is-active $s)\"; done")
     }
 
-    func testSSHConfigValidatorRejectsOptionLikeHostAndUser() {
-        var config = makeServer(id: UUID(), key: "")
-        config.sshHost = "-oProxyCommand=touch/tmp/pwned"
-        XCTAssertThrowsError(try SSHConfigValidator.destination(for: config)) { error in
-            XCTAssertEqual(error as? SSHConfigError, .invalidHost)
-        }
-
-        config.sshHost = "127.0.0.1"
-        config.sshUser = "-lroot"
-        XCTAssertThrowsError(try SSHConfigValidator.destination(for: config)) { error in
-            XCTAssertEqual(error as? SSHConfigError, .invalidUser)
-        }
-    }
-
-    func testSSHConfigValidatorBuildsSafeDestination() throws {
-        let config = ServerConfig(
-            name: "Test",
-            sshHost: "server-01.example.com",
-            sshUser: "deploy_user",
-            sshKeyPath: "",
-            sshPort: 22
-        )
-
-        XCTAssertEqual(try SSHConfigValidator.destination(for: config), "deploy_user@server-01.example.com")
-    }
-
-    func testTerminalLauncherDisplayNamesIncludeCmux() {
-        XCTAssertEqual(TerminalLauncher.displayName(for: "terminal"), "Terminal.app")
-        XCTAssertEqual(TerminalLauncher.displayName(for: "iterm2"), "iTerm2")
-        XCTAssertEqual(TerminalLauncher.displayName(for: "cmux"), "cmux")
-        XCTAssertEqual(TerminalLauncher.displayName(for: "unknown"), "Terminal.app")
-    }
-
-    func testParseDockerOutputParsesPsAndStatsSections() {
+    @Test func parseDockerOutputParsesPsAndStatsSections() {
         let output = """
         c1|web|nginx:latest|Up 2 hours
         ---
@@ -59,14 +29,14 @@ final class ServerPulseTests: XCTestCase {
         """
 
         let parsed = SSHCommandParser.parseDockerOutput(from: output)
-        XCTAssertEqual(parsed.count, 1)
-        XCTAssertEqual(parsed[0].id, "c1")
-        XCTAssertEqual(parsed[0].name, "web")
-        XCTAssertEqual(parsed[0].cpuPercent, 12.5)
-        XCTAssertEqual(parsed[0].memPercent, 40.0)
+        #expect(parsed.count == 1)
+        #expect(parsed[0].id == "c1")
+        #expect(parsed[0].name == "web")
+        #expect(parsed[0].cpuPercent == 12.5)
+        #expect(parsed[0].memPercent == 40.0)
     }
 
-    func testParseSnapshotExtractsSectionBodies() {
+    @Test func parseSnapshotExtractsSectionBodies() {
         let output = """
         __SP_CPU__
         cpu line
@@ -80,12 +50,12 @@ final class ServerPulseTests: XCTestCase {
         """
 
         let parsed = SSHCommandParser.parseSnapshot(from: output)
-        XCTAssertEqual(parsed["CPU"], "cpu line")
-        XCTAssertEqual(parsed["PROCESS"], "proc 1\nproc 2")
-        XCTAssertEqual(parsed["DOCKER"], "docker line\n---\nstats line")
+        #expect(parsed["CPU"] == "cpu line")
+        #expect(parsed["PROCESS"] == "proc 1\nproc 2")
+        #expect(parsed["DOCKER"] == "docker line\n---\nstats line")
     }
 
-    func testSnapshotCommandSkipsHeavySectionsWhenDisabled() {
+    @Test func snapshotCommandSkipsHeavySectionsWhenDisabled() {
         let config = ServerConfig(
             name: "Test",
             sshHost: "127.0.0.1",
@@ -95,12 +65,59 @@ final class ServerPulseTests: XCTestCase {
         )
 
         let command = SSHCommandParser.snapshotCommand(config: config, includeHeavyData: false)
-        XCTAssertFalse(command.contains("__SP_DOCKER__"))
-        XCTAssertFalse(command.contains("__SP_SYSTEMD__"))
-        XCTAssertTrue(command.contains("__SP_PROCESS__"))
+        #expect(!command.contains("__SP_DOCKER__"))
+        #expect(!command.contains("__SP_SYSTEMD__"))
+        #expect(command.contains("__SP_PROCESS__"))
+    }
+}
+
+@Suite("TerminalLauncher")
+struct TerminalLauncherTests {
+
+    @Test func displayNamesIncludeCmux() {
+        #expect(TerminalLauncher.displayName(for: "terminal") == "Terminal.app")
+        #expect(TerminalLauncher.displayName(for: "iterm2") == "iTerm2")
+        #expect(TerminalLauncher.displayName(for: "cmux") == "cmux")
+        #expect(TerminalLauncher.displayName(for: "unknown") == "Terminal.app")
+    }
+}
+
+@Suite("SSHConfigValidator")
+struct SSHConfigValidatorTests {
+
+    @Test func rejectsOptionLikeHost() throws {
+        var config = makeServer(id: UUID(), key: "")
+        config.sshHost = "-oProxyCommand=touch/tmp/pwned"
+        #expect(throws: SSHConfigError.invalidHost) {
+            try SSHConfigValidator.destination(for: config)
+        }
     }
 
-    func testN8NClientRejectsInvalidScheme() async {
+    @Test func rejectsOptionLikeUser() throws {
+        var config = makeServer(id: UUID(), key: "")
+        config.sshHost = "127.0.0.1"
+        config.sshUser = "-lroot"
+        #expect(throws: SSHConfigError.invalidUser) {
+            try SSHConfigValidator.destination(for: config)
+        }
+    }
+
+    @Test func buildsSafeDestination() throws {
+        let config = ServerConfig(
+            name: "Test",
+            sshHost: "server-01.example.com",
+            sshUser: "deploy_user",
+            sshKeyPath: "",
+            sshPort: 22
+        )
+        #expect(try SSHConfigValidator.destination(for: config) == "deploy_user@server-01.example.com")
+    }
+}
+
+@Suite("N8NClient")
+struct N8NClientTests {
+
+    @Test func rejectsInvalidScheme() async {
         let config = ServerConfig(
             name: "Test",
             sshHost: "127.0.0.1",
@@ -108,23 +125,13 @@ final class ServerPulseTests: XCTestCase {
             n8nBaseURL: "example.com",
             n8nAPIKey: "abc"
         )
-
         let client = N8NClient(config: config)
-
-        do {
+        await #expect(throws: N8NError.invalidScheme) {
             _ = try await client.fetchWorkflows()
-            XCTFail("Expected invalidScheme error")
-        } catch let error as N8NError {
-            guard case .invalidScheme = error else {
-                XCTFail("Expected invalidScheme, got \(error)")
-                return
-            }
-        } catch {
-            XCTFail("Expected N8NError.invalidScheme, got \(error)")
         }
     }
 
-    func testN8NClientRejectsPlainHTTP() async {
+    @Test func rejectsPlainHTTP() async {
         let config = ServerConfig(
             name: "Test",
             sshHost: "127.0.0.1",
@@ -132,50 +139,44 @@ final class ServerPulseTests: XCTestCase {
             n8nBaseURL: "http://n8n.local",
             n8nAPIKey: "abc"
         )
-
         let client = N8NClient(config: config)
-
-        do {
+        await #expect(throws: N8NError.invalidScheme) {
             _ = try await client.fetchWorkflows()
-            XCTFail("Expected invalidScheme error")
-        } catch let error as N8NError {
-            guard case .invalidScheme = error else {
-                XCTFail("Expected invalidScheme, got \(error)")
-                return
-            }
-        } catch {
-            XCTFail("Expected N8NError.invalidScheme, got \(error)")
         }
     }
+}
 
-    func testSaveServersDeletesRemovedServerKeychainEntry() {
+@Suite("AppSettings")
+struct AppSettingsTests {
+
+    @Test func saveServersDeletesRemovedServerKeychainEntry() {
         let deps = makeTestSettingsDeps()
         let settings = AppSettings(userDefaults: deps.defaults, keychain: deps.keychain)
 
         let serverA = makeServer(id: UUID(), key: "a-key")
         let serverB = makeServer(id: UUID(), key: "b-key")
 
-        XCTAssertTrue(settings.saveServers([serverA, serverB]))
-        XCTAssertEqual(deps.keychain.values[serverA.id.uuidString], "a-key")
-        XCTAssertEqual(deps.keychain.values[serverB.id.uuidString], "b-key")
+        #expect(settings.saveServers([serverA, serverB]))
+        #expect(deps.keychain.values[serverA.id.uuidString] == "a-key")
+        #expect(deps.keychain.values[serverB.id.uuidString] == "b-key")
 
-        XCTAssertTrue(settings.saveServers([serverA]))
-        XCTAssertEqual(deps.keychain.values[serverA.id.uuidString], "a-key")
-        XCTAssertNil(deps.keychain.values[serverB.id.uuidString])
-        XCTAssertTrue(deps.keychain.deletedAccounts.contains(serverB.id.uuidString))
+        #expect(settings.saveServers([serverA]))
+        #expect(deps.keychain.values[serverA.id.uuidString] == "a-key")
+        #expect(deps.keychain.values[serverB.id.uuidString] == nil)
+        #expect(deps.keychain.deletedAccounts.contains(serverB.id.uuidString))
     }
 
-    func testSaveServersFailsWhenKeychainWriteFails() {
+    @Test func saveServersFailsWhenKeychainWriteFails() {
         let deps = makeTestSettingsDeps()
         let server = makeServer(id: UUID(), key: "secret")
         deps.keychain.failSetAccounts.insert(server.id.uuidString)
 
         let settings = AppSettings(userDefaults: deps.defaults, keychain: deps.keychain)
-        XCTAssertFalse(settings.saveServers([server]))
-        XCTAssertNil(deps.defaults.data(forKey: "servers.list"))
+        #expect(!settings.saveServers([server]))
+        #expect(deps.defaults.data(forKey: "servers.list") == nil)
     }
 
-    func testLoadServersMigratesLegacyJSONKeyToKeychain() throws {
+    @Test func loadServersMigratesLegacyJSONKeyToKeychain() throws {
         let deps = makeTestSettingsDeps()
         let serverID = UUID()
         let legacyJSON = """
@@ -200,17 +201,20 @@ final class ServerPulseTests: XCTestCase {
         let settings = AppSettings(userDefaults: deps.defaults, keychain: deps.keychain)
 
         let servers = settings.loadServers()
-        XCTAssertEqual(servers.count, 1)
-        XCTAssertEqual(servers[0].n8nAPIKey, "legacy-secret")
-        XCTAssertEqual(deps.keychain.values[serverID.uuidString], "legacy-secret")
+        #expect(servers.count == 1)
+        #expect(servers[0].n8nAPIKey == "legacy-secret")
+        #expect(deps.keychain.values[serverID.uuidString] == "legacy-secret")
 
-        let resaved = try XCTUnwrap(deps.defaults.data(forKey: "servers.list"))
-        let resavedText = try XCTUnwrap(String(data: resaved, encoding: .utf8))
-        XCTAssertFalse(resavedText.contains("n8nAPIKey"))
+        let resaved = try #require(deps.defaults.data(forKey: "servers.list"))
+        let resavedText = try #require(String(data: resaved, encoding: .utf8))
+        #expect(!resavedText.contains("n8nAPIKey"))
     }
+}
 
-    @MainActor
-    func testStalePollingResultDoesNotOverwriteNewServiceState() async throws {
+@Suite("AppEnvironment")
+struct AppEnvironmentTests {
+
+    @Test @MainActor func stalePollingResultDoesNotOverwriteNewServiceState() async throws {
         let deps = makeTestSettingsDeps()
         let settings = AppSettings(userDefaults: deps.defaults, keychain: deps.keychain)
         let serverID = UUID()
@@ -246,33 +250,35 @@ final class ServerPulseTests: XCTestCase {
 
         try? await Task.sleep(nanoseconds: 700_000_000)
         let status = env.serverStates[serverID]?.status
-        XCTAssertEqual(status, .online)
+        #expect(status == .online)
     }
+}
 
-    private func makeServer(id: UUID, key: String, interval: Double = 30) -> ServerConfig {
-        ServerConfig(
-            id: id,
-            name: "Test",
-            sshHost: "127.0.0.1",
-            sshUser: "root",
-            sshKeyPath: "",
-            sshPort: 22,
-            n8nBaseURL: "https://n8n.local",
-            n8nAPIKey: key,
-            pollingInterval: interval,
-            processCount: 10,
-            processFilter: "",
-            dockerEnabled: false,
-            systemdServices: ""
-        )
-    }
+// MARK: - Helpers
 
-    private func makeTestSettingsDeps() -> (defaults: UserDefaults, keychain: MockKeychainStore) {
-        let suiteName = "ServerPulseTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defaults.removePersistentDomain(forName: suiteName)
-        return (defaults, MockKeychainStore())
-    }
+private func makeServer(id: UUID, key: String, interval: Double = 30) -> ServerConfig {
+    ServerConfig(
+        id: id,
+        name: "Test",
+        sshHost: "127.0.0.1",
+        sshUser: "root",
+        sshKeyPath: "",
+        sshPort: 22,
+        n8nBaseURL: "https://n8n.local",
+        n8nAPIKey: key,
+        pollingInterval: interval,
+        processCount: 10,
+        processFilter: "",
+        dockerEnabled: false,
+        systemdServices: ""
+    )
+}
+
+private func makeTestSettingsDeps() -> (defaults: UserDefaults, keychain: MockKeychainStore) {
+    let suiteName = "ServerPulseTests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defaults.removePersistentDomain(forName: suiteName)
+    return (defaults, MockKeychainStore())
 }
 
 private final class MockKeychainStore: KeychainStoring {
@@ -282,9 +288,7 @@ private final class MockKeychainStore: KeychainStoring {
 
     @discardableResult
     func set(_ value: String, account: String) -> Bool {
-        if failSetAccounts.contains(account) {
-            return false
-        }
+        if failSetAccounts.contains(account) { return false }
         if value.isEmpty {
             values.removeValue(forKey: account)
             return true
