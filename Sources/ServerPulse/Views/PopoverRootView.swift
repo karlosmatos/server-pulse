@@ -120,7 +120,7 @@ struct PopoverRootView: View {
                         )
                     }
                 }
-                .help("Open SSH session in \(appEnv.settings.terminalApp == "iterm" ? "iTerm2" : "Terminal.app")")
+                .help("Open SSH session in \(TerminalLauncher.displayName(for: appEnv.settings.terminalApp))")
                 .disabled({
                     guard let s = appEnv.selectedServer else { return true }
                     return s.sshHost.isEmpty || s.sshUser.isEmpty

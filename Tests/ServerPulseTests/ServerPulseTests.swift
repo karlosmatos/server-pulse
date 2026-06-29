@@ -71,6 +71,17 @@ struct SSHCommandParserTests {
     }
 }
 
+@Suite("TerminalLauncher")
+struct TerminalLauncherTests {
+
+    @Test func displayNamesIncludeCmux() {
+        #expect(TerminalLauncher.displayName(for: "terminal") == "Terminal.app")
+        #expect(TerminalLauncher.displayName(for: "iterm2") == "iTerm2")
+        #expect(TerminalLauncher.displayName(for: "cmux") == "cmux")
+        #expect(TerminalLauncher.displayName(for: "unknown") == "Terminal.app")
+    }
+}
+
 @Suite("SSHConfigValidator")
 struct SSHConfigValidatorTests {
 
