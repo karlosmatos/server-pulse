@@ -76,6 +76,13 @@ final class ServerPulseTests: XCTestCase {
         XCTAssertEqual(issues.first?.message, "Disk at 93 %")
     }
 
+    func testServerHealthClampsNonFiniteMetrics() {
+        var state = ServerState()
+        state.status = .online
+        state.stats = makeStats(cpu: .infinity, disk: .nan)
+        XCTAssertEqual(ServerHealth.issues(for: state).map(\.message), ["CPU at 100 %"])
+    }
+
     func testServerHealthIsEmptyForHealthyServer() {
         var state = ServerState()
         state.status = .online

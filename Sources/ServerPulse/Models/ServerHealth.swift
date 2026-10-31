@@ -73,7 +73,7 @@ enum ServerHealth {
                     id: metric.id,
                     severity: severity,
                     symbol: metric.symbol,
-                    message: "\(metric.label) at \(Int(metric.percent.rounded())) %"
+                    message: "\(metric.label) at \(Int(min(metric.percent, 100).rounded())) %"
                 ))
             }
         }
