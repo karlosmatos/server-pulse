@@ -1,6 +1,6 @@
 import Foundation
 
-enum N8NError: Error, LocalizedError {
+enum N8NError: Error, LocalizedError, Equatable {
     case missingAPIKey
     case invalidURL
     case invalidScheme

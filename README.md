@@ -18,7 +18,7 @@ A macOS menu bar app that monitors **multiple Linux servers** — showing CPU/RA
 
 - macOS 14 (Sonoma) or later
 - SSH key-based access to each server (no password prompts)
-- Swift 5.9+ (`xcode-select --install`)
+- Swift 6.0+ / Xcode Command Line Tools 16+ (`xcode-select --install`)
 
 ## Setup
 
