@@ -51,6 +51,38 @@ final class ServerPulseTests: XCTestCase {
         XCTAssertEqual(TerminalLauncher.displayName(for: "unknown"), "Terminal.app")
     }
 
+    func testMetricThresholdsMapPercentToSeverity() {
+        XCTAssertEqual(MetricThresholds.severity(forPercent: 79.9), .ok)
+        XCTAssertEqual(MetricThresholds.severity(forPercent: 80), .warning)
+        XCTAssertEqual(MetricThresholds.severity(forPercent: 90), .critical)
+    }
+
+    func testServerHealthReportsOfflineServerAsSingleCriticalIssue() {
+        var state = ServerState()
+        state.status = .offline
+        state.stats = makeStats(disk: 95)
+        let issues = ServerHealth.issues(for: state)
+        XCTAssertEqual(issues.map(\.id), ["offline"])
+        XCTAssertEqual(ServerHealth.severity(of: issues), .critical)
+    }
+
+    func testServerHealthOrdersIssuesBySeverity() {
+        var state = ServerState()
+        state.status = .online
+        state.stats = makeStats(cpu: 85, disk: 93)
+        state.systemdServices = [SystemdService(id: "nginx", name: "nginx", state: .inactive)]
+        let issues = ServerHealth.issues(for: state)
+        XCTAssertEqual(issues.map(\.id), ["disk", "cpu", "services.inactive"])
+        XCTAssertEqual(issues.first?.message, "Disk at 93 %")
+    }
+
+    func testServerHealthIsEmptyForHealthyServer() {
+        var state = ServerState()
+        state.status = .online
+        state.stats = makeStats()
+        XCTAssertTrue(ServerHealth.issues(for: state).isEmpty)
+    }
+
     func testParseDockerOutputParsesPsAndStatsSections() {
         let output = """
         c1|web|nginx:latest|Up 2 hours
@@ -281,6 +313,13 @@ final class ServerPulseTests: XCTestCase {
         let completed = await probe.completedCount()
         XCTAssertLessThanOrEqual(maxActive, 3)
         XCTAssertEqual(completed, 6)
+    }
+
+    private func makeStats(cpu: Double = 10, disk: Double = 40) -> ServerStats {
+        ServerStats(
+            cpuUsage: cpu, ramUsed: 1024, ramTotal: 4096,
+            diskUsed: "10G", diskTotal: "50G", diskUsagePercent: disk, uptime: "1 day"
+        )
     }
 
     private func makeServer(id: UUID, key: String, interval: Double = 30) -> ServerConfig {

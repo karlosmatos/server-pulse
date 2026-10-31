@@ -52,6 +52,20 @@ final class AppEnvironment {
         return .unknown
     }
 
+    func issues(for id: UUID) -> [ServerIssue] {
+        guard let state = serverStates[id] else { return [] }
+        return ServerHealth.issues(for: state)
+    }
+
+    /// Number of servers with at least one issue (shown in the menu bar).
+    var attentionCount: Int {
+        servers.filter { !issues(for: $0.id).isEmpty }.count
+    }
+
+    var worstSeverity: Severity {
+        servers.map { ServerHealth.severity(of: issues(for: $0.id)) }.max() ?? .ok
+    }
+
     // MARK: - Init
 
     init(
