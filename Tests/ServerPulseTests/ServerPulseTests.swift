@@ -249,6 +249,40 @@ final class ServerPulseTests: XCTestCase {
         XCTAssertEqual(status, .online)
     }
 
+    @MainActor
+    func testPollingLimitsConcurrentServerPolls() async throws {
+        let deps = makeTestSettingsDeps()
+        let settings = AppSettings(userDefaults: deps.defaults, keychain: deps.keychain)
+        let probe = PollConcurrencyProbe()
+
+        let env = AppEnvironment(
+            settings: settings,
+            pollingServiceFactory: { config in
+                PollingService(config: config, pollOverride: {
+                    await probe.enter()
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                    await probe.leave()
+                    var result = PollResult()
+                    result.status = .online
+                    return result
+                })
+            },
+            notificationPermissionRequester: {},
+            maxConcurrentPolls: 3,
+            autoStartPolling: false
+        )
+
+        for index in 0..<6 {
+            env.addServer(makeServer(id: UUID(), key: "k-\(index)", interval: 3_600))
+        }
+
+        try? await Task.sleep(nanoseconds: 700_000_000)
+        let maxActive = await probe.maxActiveCount()
+        let completed = await probe.completedCount()
+        XCTAssertLessThanOrEqual(maxActive, 3)
+        XCTAssertEqual(completed, 6)
+    }
+
     private func makeServer(id: UUID, key: String, interval: Double = 30) -> ServerConfig {
         ServerConfig(
             id: id,
@@ -272,6 +306,30 @@ final class ServerPulseTests: XCTestCase {
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
         return (defaults, MockKeychainStore())
+    }
+}
+
+private actor PollConcurrencyProbe {
+    private var active = 0
+    private var maxActive = 0
+    private var completed = 0
+
+    func enter() {
+        active += 1
+        maxActive = max(maxActive, active)
+    }
+
+    func leave() {
+        active -= 1
+        completed += 1
+    }
+
+    func maxActiveCount() -> Int {
+        maxActive
+    }
+
+    func completedCount() -> Int {
+        completed
     }
 }
 
