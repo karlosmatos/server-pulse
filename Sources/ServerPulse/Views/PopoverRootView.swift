@@ -1,7 +1,9 @@
+import Sparkle
 import SwiftUI
 
 @MainActor
 struct PopoverRootView: View {
+    let updater: SPUUpdater
     @Environment(AppEnvironment.self) private var appEnv
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showSettings = false
@@ -154,6 +156,10 @@ struct PopoverRootView: View {
 
     private var footer: some View {
         HStack {
+            Button { updater.checkForUpdates() } label: {
+                Text("Check for Updates…").font(.caption).foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.plain)
             Spacer()
             Button { NSApplication.shared.terminate(nil) } label: {
                 Text("Quit ServerPulse").font(.caption).foregroundStyle(.tertiary)

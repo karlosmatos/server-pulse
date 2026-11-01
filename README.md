@@ -88,7 +88,7 @@ Output artifact: `build/ServerPulse-1.0.0.dmg`
 
 ### Automated GitHub Releases on tags
 
-This repo includes a workflow at `.github/workflows/release.yml` that runs on tags matching `v*` and publishes a notarized DMG.
+This repo includes a workflow at `.github/workflows/release.yml` that runs on tags matching `v*` and publishes a notarized DMG plus a Sparkle `appcast.xml`. Installed apps check `releases/latest/download/appcast.xml` and update themselves (also via "Check for Updates…" in the popover footer).
 
 ```bash
 git tag v1.0.0
@@ -102,6 +102,14 @@ Required GitHub Actions secrets:
 - `APPLE_NOTARY_APPLE_ID`
 - `APPLE_NOTARY_APP_SPECIFIC_PASSWORD`
 - `APPLE_TEAM_ID`
+- `SPARKLE_ED_PRIVATE_KEY` (EdDSA key matching `SUPublicEDKey` in `Info.plist`)
+
+Export the Sparkle key from your keychain (created once with `.build/artifacts/sparkle/Sparkle/bin/generate_keys`):
+
+```bash
+.build/artifacts/sparkle/Sparkle/bin/generate_keys -x sparkle_key.txt
+gh secret set SPARKLE_ED_PRIVATE_KEY < sparkle_key.txt && rm sparkle_key.txt
+```
 
 Example for `APPLE_DEVELOPER_ID_APPLICATION_CERT_BASE64`:
 
