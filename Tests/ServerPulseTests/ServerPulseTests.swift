@@ -211,6 +211,49 @@ struct AppSettingsTests {
     }
 }
 
+@Suite("ServerHealth")
+struct ServerHealthTests {
+
+    @Test func metricThresholdsMapPercentToSeverity() {
+        #expect(MetricThresholds.severity(forPercent: 79.9) == .ok)
+        #expect(MetricThresholds.severity(forPercent: 80) == .warning)
+        #expect(MetricThresholds.severity(forPercent: 90) == .critical)
+    }
+
+    @Test func reportsOfflineServerAsSingleCriticalIssue() {
+        var state = ServerState()
+        state.status = .offline
+        state.stats = makeStats(disk: 95)
+        let issues = ServerHealth.issues(for: state)
+        #expect(issues.map(\.id) == ["offline"])
+        #expect(ServerHealth.severity(of: issues) == .critical)
+    }
+
+    @Test func ordersIssuesBySeverity() {
+        var state = ServerState()
+        state.status = .online
+        state.stats = makeStats(cpu: 85, disk: 93)
+        state.systemdServices = [SystemdService(id: "nginx", name: "nginx", state: .inactive)]
+        let issues = ServerHealth.issues(for: state)
+        #expect(issues.map(\.id) == ["disk", "cpu", "services.inactive"])
+        #expect(issues.first?.message == "Disk at 93 %")
+    }
+
+    @Test func clampsNonFiniteMetrics() {
+        var state = ServerState()
+        state.status = .online
+        state.stats = makeStats(cpu: .infinity, disk: .nan)
+        #expect(ServerHealth.issues(for: state).map(\.message) == ["CPU at 100 %"])
+    }
+
+    @Test func isEmptyForHealthyServer() {
+        var state = ServerState()
+        state.status = .online
+        state.stats = makeStats()
+        #expect(ServerHealth.issues(for: state).isEmpty)
+    }
+}
+
 @Suite("AppEnvironment")
 struct AppEnvironmentTests {
 
@@ -252,6 +295,37 @@ struct AppEnvironmentTests {
         let status = env.serverStates[serverID]?.status
         #expect(status == .online)
     }
+
+    @Test @MainActor func limitsConcurrentServerPolls() async throws {
+        let deps = makeTestSettingsDeps()
+        let settings = AppSettings(userDefaults: deps.defaults, keychain: deps.keychain)
+        let probe = PollConcurrencyProbe()
+
+        let env = AppEnvironment(
+            settings: settings,
+            pollingServiceFactory: { config in
+                PollingService(config: config, pollOverride: {
+                    await probe.enter()
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                    await probe.leave()
+                    var result = PollResult()
+                    result.status = .online
+                    return result
+                })
+            },
+            notificationPermissionRequester: {},
+            maxConcurrentPolls: 3,
+            autoStartPolling: false
+        )
+
+        for index in 0..<6 {
+            env.addServer(makeServer(id: UUID(), key: "k-\(index)", interval: 3_600))
+        }
+
+        try? await Task.sleep(nanoseconds: 700_000_000)
+        #expect(await probe.maxActiveCount() <= 3)
+        #expect(await probe.completedCount() == 6)
+    }
 }
 
 // MARK: - Helpers
@@ -279,6 +353,37 @@ private func makeTestSettingsDeps() -> (defaults: UserDefaults, keychain: MockKe
     let defaults = UserDefaults(suiteName: suiteName)!
     defaults.removePersistentDomain(forName: suiteName)
     return (defaults, MockKeychainStore())
+}
+
+private func makeStats(cpu: Double = 10, disk: Double = 40) -> ServerStats {
+    ServerStats(
+        cpuUsage: cpu, ramUsed: 1024, ramTotal: 4096,
+        diskUsed: "10G", diskTotal: "50G", diskUsagePercent: disk, uptime: "1 day"
+    )
+}
+
+private actor PollConcurrencyProbe {
+    private var active = 0
+    private var maxActive = 0
+    private var completed = 0
+
+    func enter() {
+        active += 1
+        maxActive = max(maxActive, active)
+    }
+
+    func leave() {
+        active -= 1
+        completed += 1
+    }
+
+    func maxActiveCount() -> Int {
+        maxActive
+    }
+
+    func completedCount() -> Int {
+        completed
+    }
 }
 
 private final class MockKeychainStore: KeychainStoring {
