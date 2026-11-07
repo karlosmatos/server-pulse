@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { containers, servers, services, statusColor, statusLabel } from "@/lib/mock";
+import { StackIcon } from "./brand-marks";
 import { ClockIcon, CogIcon, CubeIcon, GaugeIcon, TerminalIcon, WarnTriangle } from "./icons";
 
 /* ---------- Menu bar ---------- */
@@ -259,9 +260,7 @@ export const Notification = ({
       className,
     )}
   >
-    <span className="flex size-9 shrink-0 items-center justify-center rounded-[9px] bg-[#0F131B]">
-      <span className="size-3.5 rounded-full bg-brand" />
-    </span>
+    <StackIcon className="size-9 shrink-0" />
     <div className="min-w-0 text-[12.5px] leading-snug">
       <div className="flex justify-between gap-2">
         <span className="font-semibold text-neutral-900 dark:text-white">{title}</span>

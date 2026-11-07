@@ -24,7 +24,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(site.url),
   title: "ServerPulse · Your servers, one dot away",
   description: site.description,
-  icons: { icon: `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/logo/logo-beacon.svg` },
+  icons: { icon: `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/logo/logo-stack.svg` },
   openGraph: { title: "ServerPulse", description: site.description, url: site.url, type: "website" },
 };
 

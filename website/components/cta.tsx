@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { Container } from "./container";
 import { SectionHeading } from "./typography";
 import { Button } from "./button";
-import { BeaconIcon } from "./brand-marks";
+import { StackIcon } from "./brand-marks";
 import { AppleIcon, BellIcon, CogIcon, CubeIcon, FlowIcon, GaugeIcon, KeyIcon, ListIcon, ServersIcon, TerminalIcon } from "./icons";
 import { site } from "@/lib/site";
 
@@ -87,7 +87,7 @@ const Orbit = ({ className }: { className?: string }) => (
 export const CTA = () => (
   <Container className="border-divide relative flex min-h-[520px] flex-col items-center justify-center overflow-hidden border-x px-4 py-16 md:min-h-[600px]">
     <Orbit className="absolute top-1/2 scale-75 md:scale-100 left-1/2 -translate-x-1/2 -translate-y-1/2 mask-radial-from-40% mask-radial-to-70%" />
-    <BeaconIcon className="relative z-10 size-24 drop-shadow-xl" />
+    <StackIcon className="relative z-10 size-24 drop-shadow-xl" />
     <SectionHeading className="relative z-10 mt-6 text-center lg:text-6xl">
       Stop checking. <br /> Start knowing.
     </SectionHeading>
