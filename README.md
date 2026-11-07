@@ -130,3 +130,11 @@ Views read the same flat `AppEnvironment` properties (`serverStatus`, `stats`, `
 ## License
 
 MIT
+
+## Website
+
+The landing page lives in `website/` (Next.js, static export). It deploys to GitHub Pages from `main` via `.github/workflows/pages.yml`.
+
+```bash
+cd website && npm install && npm run dev
+```
