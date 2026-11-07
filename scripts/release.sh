@@ -138,15 +138,27 @@ fi
 
 log "Creating .app bundle"
 rm -rf "$APP_PATH" "$ZIP_PATH" "$DMG_ROOT_PATH" "$DMG_PATH"
-mkdir -p "$CONTENTS_PATH/MacOS" "$CONTENTS_PATH/Resources"
+mkdir -p "$CONTENTS_PATH/MacOS" "$CONTENTS_PATH/Resources" "$CONTENTS_PATH/Frameworks"
 cp "$BINARY_PATH" "$CONTENTS_PATH/MacOS/$APP_NAME"
 cp "$INFO_PLIST_PATH" "$CONTENTS_PATH/Info.plist"
 cp "$ICON_PATH" "$CONTENTS_PATH/Resources/AppIcon.icns"
 chmod +x "$CONTENTS_PATH/MacOS/$APP_NAME"
 
+# Sparkle compares CFBundleVersion to decide whether an update is newer.
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$CONTENTS_PATH/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$CONTENTS_PATH/Info.plist"
+
+# XPC services are only needed by sandboxed apps; ServerPulse is not sandboxed.
+ditto "$ROOT_DIR/.build/$CONFIGURATION/Sparkle.framework" "$CONTENTS_PATH/Frameworks/Sparkle.framework"
+rm -rf "$CONTENTS_PATH/Frameworks/Sparkle.framework/Versions/B/XPCServices"
+
 if [[ "$SKIP_SIGNING" != "1" ]]; then
     log "Signing app with identity: $DEV_ID_APP_CERT"
-    codesign --force --deep --options runtime --timestamp \
+    SPARKLE_PATH="$CONTENTS_PATH/Frameworks/Sparkle.framework"
+    for nested in "$SPARKLE_PATH/Versions/B/Autoupdate" "$SPARKLE_PATH/Versions/B/Updater.app" "$SPARKLE_PATH"; do
+        codesign --force --options runtime --timestamp --sign "$DEV_ID_APP_CERT" "$nested"
+    done
+    codesign --force --options runtime --timestamp \
         --entitlements "$ENTITLEMENTS_PATH" \
         --sign "$DEV_ID_APP_CERT" \
         "$APP_PATH"

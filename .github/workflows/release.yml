@@ -80,9 +80,46 @@ jobs:
           name: ServerPulse-dmg
           path: build/*.dmg
 
+      - name: Generate Sparkle appcast
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          VERSION: ${{ github.ref_name }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          if [[ -z "$SPARKLE_ED_PRIVATE_KEY" ]]; then
+            echo "Missing SPARKLE_ED_PRIVATE_KEY secret." >&2
+            exit 1
+          fi
+
+          CLEAN_VERSION="${VERSION#v}"
+          DMG_NAME="ServerPulse-$CLEAN_VERSION.dmg"
+          SIGNATURE_ATTRS="$(echo "$SPARKLE_ED_PRIVATE_KEY" \
+            | .build/artifacts/sparkle/Sparkle/bin/sign_update --ed-key-file - "build/$DMG_NAME")"
+
+          cat > build/appcast.xml <<EOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+            <channel>
+              <title>ServerPulse</title>
+              <item>
+                <title>$CLEAN_VERSION</title>
+                <pubDate>$(LC_ALL=C date -u "+%a, %d %b %Y %H:%M:%S +0000")</pubDate>
+                <sparkle:version>$CLEAN_VERSION</sparkle:version>
+                <sparkle:shortVersionString>$CLEAN_VERSION</sparkle:shortVersionString>
+                <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+                <sparkle:fullReleaseNotesLink>$REPO_URL/releases/tag/$VERSION</sparkle:fullReleaseNotesLink>
+                <enclosure url="$REPO_URL/releases/download/$VERSION/$DMG_NAME" type="application/octet-stream" $SIGNATURE_ATTRS />
+              </item>
+            </channel>
+          </rss>
+          EOF
+
       - name: Publish GitHub release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: build/*.dmg
+          files: |
+            build/*.dmg
+            build/appcast.xml
           generate_release_notes: true

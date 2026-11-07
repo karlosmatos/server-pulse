@@ -12,10 +12,13 @@ echo "Creating app bundle..."
 rm -rf "$APP"
 mkdir -p "$CONTENTS/MacOS"
 mkdir -p "$CONTENTS/Resources"
+mkdir -p "$CONTENTS/Frameworks"
 
 cp "$BINARY" "$CONTENTS/MacOS/ServerPulse"
 cp "Resources/Info.plist" "$CONTENTS/Info.plist"
 cp "Resources/AppIcon.icns" "$CONTENTS/Resources/AppIcon.icns"
+ditto ".build/release/Sparkle.framework" "$CONTENTS/Frameworks/Sparkle.framework"
+rm -rf "$CONTENTS/Frameworks/Sparkle.framework/Versions/B/XPCServices"
 
 echo "Code signing..."
 codesign --force --deep --sign "-" \
