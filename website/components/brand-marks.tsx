@@ -94,6 +94,64 @@ export const StackIcon = (props: SvgProps) => {
   );
 };
 
+/* Simplified Stack variants: rack units and status lights only, no heartbeat. */
+
+const unit = { fill: "#262F42", stroke: "#fff", strokeOpacity: 0.07, strokeWidth: 3 };
+const GREEN = "#34E08A";
+const AMBER = "#F5B841";
+
+/** S1 · Lights: three units, one light each. Two green, one amber. */
+export const StackLightsIcon = (props: SvgProps) => {
+  const id = useId().replace(/:/g, "");
+  return (
+    <IconBase id={id} {...props}>
+      {[247, 437, 627].map((y, i) => (
+        <g key={y}>
+          <rect x="222" y={y} width="580" height="150" rx="44" {...unit} />
+          <circle cx="712" cy={y + 75} r="34" fill={i === 2 ? AMBER : GREEN} />
+        </g>
+      ))}
+    </IconBase>
+  );
+};
+
+/** S2 · Duo: two taller units with big lights. Boldest at small sizes. */
+export const StackDuoIcon = (props: SvgProps) => {
+  const id = useId().replace(/:/g, "");
+  return (
+    <IconBase id={id} {...props}>
+      {[257, 537].map((y, i) => (
+        <g key={y}>
+          <rect x="222" y={y} width="580" height="230" rx="60" {...unit} />
+          <circle cx="682" cy={y + 115} r="50" fill={i === 1 ? AMBER : GREEN} />
+        </g>
+      ))}
+    </IconBase>
+  );
+};
+
+/** S3 · Signal: one lit unit pinging, the others idle. Echoes the menu bar dot. */
+export const StackSignalIcon = (props: SvgProps) => {
+  const id = useId().replace(/:/g, "");
+  return (
+    <IconBase id={id} {...props}>
+      {[247, 437, 627].map((y, i) => (
+        <g key={y}>
+          <rect x="222" y={y} width="580" height="150" rx="44" {...unit} />
+          {i === 0 ? (
+            <>
+              <circle cx="712" cy={y + 75} r="62" fill="none" stroke={GREEN} strokeOpacity=".3" strokeWidth="12" />
+              <circle cx="712" cy={y + 75} r="38" fill={GREEN} />
+            </>
+          ) : (
+            <circle cx="712" cy={y + 75} r="26" fill="#4A556B" />
+          )}
+        </g>
+      ))}
+    </IconBase>
+  );
+};
+
 /** C · Prompt: a shell prompt whose cursor is a heartbeat. */
 export const PromptIcon = (props: SvgProps) => {
   const id = useId().replace(/:/g, "");

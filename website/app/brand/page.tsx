@@ -1,8 +1,17 @@
 import type { Metadata } from "next";
+import type React from "react";
 import { Container } from "@/components/container";
 import { DivideX } from "@/components/divide";
 import { Badge, Eyebrow, Heading, SubHeading } from "@/components/typography";
-import { BeaconIcon, BeaconMark, PromptIcon, StackIcon } from "@/components/brand-marks";
+import {
+  BeaconIcon,
+  BeaconMark,
+  PromptIcon,
+  StackDuoIcon,
+  StackIcon,
+  StackLightsIcon,
+  StackSignalIcon,
+} from "@/components/brand-marks";
 import { MenuBar } from "@/components/mac";
 import { Scale } from "@/components/scale";
 import { CornerDots } from "@/components/dots";
@@ -10,19 +19,46 @@ import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "ServerPulse · Brand" };
 
-const concepts = [
+type Concept = {
+  key: string;
+  name: string;
+  Icon: (p: React.SVGProps<SVGSVGElement>) => React.JSX.Element;
+  body: string;
+};
+
+const simplified: Concept[] = [
+  {
+    key: "S1",
+    name: "Lights",
+    Icon: StackLightsIcon,
+    body: "Three rack units, one status light each: two green, one amber. Nothing else. It reads as “servers” at any size, and the amber light hints at what the app is for.",
+  },
+  {
+    key: "S2",
+    name: "Duo",
+    Icon: StackDuoIcon,
+    body: "Two taller units with big lights. The boldest of the three at 16 px, but “two” says less about many servers than “three”.",
+  },
+  {
+    key: "S3",
+    name: "Signal",
+    Icon: StackSignalIcon,
+    body: "One unit lit and pinging, the others idle. Calmer, and the lit light is the same green dot you see in the menu bar.",
+  },
+];
+
+const earlier: Concept[] = [
   {
     key: "A",
     name: "Beacon",
     Icon: BeaconIcon,
-    recommended: true,
-    body: "The menu bar dot becomes the icon. A heartbeat is cut out of it and two rings spread like a ping. The app icon and the indicator next to your clock tell one story, and it still reads as a green dot at 16 px.",
+    body: "The menu bar dot with a heartbeat cut out. Ties to the indicator, but the heartbeat reads as health rather than servers.",
   },
   {
     key: "B",
     name: "Stack",
     Icon: StackIcon,
-    body: "A rack with three units, each with its own status light. It says “many servers” most literally, but the detail turns to mush below 32 px.",
+    body: "The original rack with a pulse line and vents. Accurate, but the detail turns to mush below 32 px.",
   },
   {
     key: "C",
@@ -31,6 +67,51 @@ const concepts = [
     body: "A shell prompt whose cursor is a heartbeat. It nods to SSH, but it looks like many terminal apps.",
   },
 ];
+
+const ConceptRow = ({ c, highlight }: { c: Concept; highlight?: boolean }) => (
+  <>
+    <Container className="border-divide divide-divide grid grid-cols-1 border-x md:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] md:divide-x">
+      <div className="relative flex items-center justify-center bg-gray-100 p-10 md:p-14 dark:bg-neutral-900">
+        {highlight && <CornerDots />}
+        <Scale />
+        <c.Icon className="relative size-48 drop-shadow-2xl md:size-56" />
+      </div>
+      <div className="flex flex-col justify-center p-6 md:p-10">
+        <div className="flex items-center gap-3">
+          <span className="font-mono text-sm text-neutral-400">{c.key}</span>
+          <h2 className="text-charcoal-700 text-3xl font-medium tracking-tight dark:text-neutral-100">{c.name}</h2>
+        </div>
+        <p className="mt-3 max-w-lg text-gray-600 dark:text-neutral-400">{c.body}</p>
+        <div className="mt-8 flex flex-wrap items-end gap-6">
+          {[128, 64, 32, 16].map((s) => (
+            <figure key={s} className="flex flex-col items-center gap-2">
+              <c.Icon style={{ width: s, height: s }} />
+              <figcaption className="font-mono text-[11px] text-neutral-400">{s}</figcaption>
+            </figure>
+          ))}
+          <figure className="flex flex-col items-center gap-2">
+            <div className="flex items-end gap-2 rounded-2xl bg-black/5 px-3 py-2 dark:bg-white/10">
+              <span className="size-11 rounded-[11px] bg-black/10 dark:bg-white/10" />
+              <c.Icon className="size-14" />
+              <span className="size-11 rounded-[11px] bg-black/10 dark:bg-white/10" />
+            </div>
+            <figcaption className="font-mono text-[11px] text-neutral-400">Dock</figcaption>
+          </figure>
+        </div>
+      </div>
+    </Container>
+    <DivideX />
+  </>
+);
+
+const SectionLabel = ({ children }: { children: React.ReactNode }) => (
+  <>
+    <Container className="border-divide border-x">
+      <Eyebrow className="py-8 md:py-10">{children}</Eyebrow>
+    </Container>
+    <DivideX />
+  </>
+);
 
 const palette = [
   { name: "Signal", hex: "#12B76A", note: "Online, brand" },
@@ -49,51 +130,31 @@ export default function Brand() {
         <Badge text="Brand proposal" />
         <Heading className="mt-5">Logo concepts</Heading>
         <SubHeading className="mx-auto mt-6 max-w-lg">
-          Three directions for the app icon. The recommended one builds on what people see every day: the status dot
-          in the menu bar.
+          The rack won: it says servers, not health. Here it is stripped down to units and status lights, in three
+          variants, with the earlier directions below for comparison.
         </SubHeading>
       </Container>
       <DivideX />
 
-      {concepts.map(({ key, name, Icon, recommended, body }) => (
-        <div key={key}>
-          <Container className="border-divide divide-divide grid grid-cols-1 border-x md:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] md:divide-x">
-            <div className="relative flex items-center justify-center bg-gray-100 p-10 md:p-14 dark:bg-neutral-900">
-              {recommended && <CornerDots />}
-              <Scale />
-              <Icon className="relative size-48 drop-shadow-2xl md:size-56" />
-            </div>
-            <div className="flex flex-col justify-center p-6 md:p-10">
-              <div className="flex items-center gap-3">
-                <span className="font-mono text-sm text-neutral-400">{key}</span>
-                <h2 className="text-charcoal-700 text-3xl font-medium tracking-tight dark:text-neutral-100">{name}</h2>
-                {recommended && (
-                  <span className="text-brand-ink dark:text-brand bg-brand/10 rounded-md px-2 py-0.5 font-mono text-xs">
-                    recommended
-                  </span>
-                )}
-              </div>
-              <p className="mt-3 max-w-lg text-gray-600 dark:text-neutral-400">{body}</p>
-              <div className="mt-8 flex flex-wrap items-end gap-6">
-                {[128, 64, 32, 16].map((s) => (
-                  <figure key={s} className="flex flex-col items-center gap-2">
-                    <Icon style={{ width: s, height: s }} />
-                    <figcaption className="font-mono text-[11px] text-neutral-400">{s}</figcaption>
-                  </figure>
-                ))}
-                <figure className="flex flex-col items-center gap-2">
-                  <div className="flex items-end gap-2 rounded-2xl bg-black/5 px-3 py-2 dark:bg-white/10">
-                    <span className="size-11 rounded-[11px] bg-black/10 dark:bg-white/10" />
-                    <Icon className="size-14" />
-                    <span className="size-11 rounded-[11px] bg-black/10 dark:bg-white/10" />
-                  </div>
-                  <figcaption className="font-mono text-[11px] text-neutral-400">Dock</figcaption>
-                </figure>
-              </div>
-            </div>
-          </Container>
-          <DivideX />
-        </div>
+      <SectionLabel>Stack, simplified</SectionLabel>
+      <Container className="border-divide divide-divide grid grid-cols-3 divide-x border-x">
+        {simplified.map((c) => (
+          <div key={c.key} className="flex flex-col items-center gap-3 p-6 md:p-10">
+            <c.Icon className="size-20 md:size-32" />
+            <span className="font-mono text-xs text-neutral-500">
+              {c.key} · {c.name}
+            </span>
+          </div>
+        ))}
+      </Container>
+      <DivideX />
+      {simplified.map((c, i) => (
+        <ConceptRow key={c.key} c={c} highlight={i === 0} />
+      ))}
+
+      <SectionLabel>Earlier directions</SectionLabel>
+      {earlier.map((c) => (
+        <ConceptRow key={c.key} c={c} />
       ))}
 
       <Container className="border-divide border-x">
