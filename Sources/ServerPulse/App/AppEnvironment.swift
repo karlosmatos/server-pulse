@@ -23,7 +23,8 @@ final class AppEnvironment {
     private(set) var servers: [ServerConfig] = []
     private(set) var serverStates: [UUID: ServerState] = [:]
     private var pollingServices: [UUID: PollingService] = [:]
-    private var pollingTasks: [UUID: Task<Void, Never>] = [:]
+    nonisolated private let pollingTaskBag = PollingTaskBag()
+    private let pollLimiter: PollConcurrencyLimiter
     private var refreshingServerIDs = Set<UUID>()
     private var pendingRefreshServerIDs = Set<UUID>()
     private var forcedHeavyRefreshServerIDs = Set<UUID>()
@@ -51,17 +52,33 @@ final class AppEnvironment {
         return .unknown
     }
 
+    func issues(for id: UUID) -> [ServerIssue] {
+        guard let state = serverStates[id] else { return [] }
+        return ServerHealth.issues(for: state)
+    }
+
+    /// Number of servers with at least one issue (shown in the menu bar).
+    var attentionCount: Int {
+        servers.filter { !issues(for: $0.id).isEmpty }.count
+    }
+
+    var worstSeverity: Severity {
+        servers.map { ServerHealth.severity(of: issues(for: $0.id)) }.max() ?? .ok
+    }
+
     // MARK: - Init
 
     init(
         settings: AppSettings = AppSettings(),
         pollingServiceFactory: @escaping (ServerConfig) -> PollingService = { PollingService(config: $0) },
         notificationPermissionRequester: @escaping @Sendable () async -> Void = { await NotificationManager.requestPermission() },
+        maxConcurrentPolls: Int = 3,
         autoStartPolling: Bool = true
     ) {
         self.settings = settings
         self.pollingServiceFactory = pollingServiceFactory
         self.notificationPermissionRequester = notificationPermissionRequester
+        self.pollLimiter = PollConcurrencyLimiter(maxConcurrentPolls: maxConcurrentPolls)
 
         servers = settings.loadServers()
         migrateIfNeeded()
@@ -77,9 +94,25 @@ final class AppEnvironment {
         }
 
         guard autoStartPolling else { return }
+        var staggerIndex = 0
         for server in servers {
-            startPolling(for: server)
+            let initialDelay: TimeInterval
+            if server.id == selectedServerID {
+                initialDelay = 0
+            } else {
+                initialDelay = Self.startupStaggerDelay(
+                    index: staggerIndex,
+                    total: max(servers.count - 1, 1),
+                    interval: server.pollingInterval
+                )
+                staggerIndex += 1
+            }
+            startPolling(for: server, initialDelay: initialDelay)
         }
+    }
+
+    deinit {
+        pollingTaskBag.cancelAll()
     }
 
     // MARK: - Server management
@@ -134,7 +167,7 @@ final class AppEnvironment {
 
     // MARK: - Polling
 
-    func startPolling(for config: ServerConfig) {
+    func startPolling(for config: ServerConfig, initialDelay: TimeInterval = 0) {
         Task { [weak self] in
             await self?.requestNotificationPermissionIfNeeded()
         }
@@ -143,17 +176,17 @@ final class AppEnvironment {
         pollingServices[config.id] = service
         serverStates[config.id] = serverStates[config.id] ?? ServerState()
 
-        pollingTasks[config.id]?.cancel()
-        pollingTasks[config.id] = Task { [weak self, id = config.id, serviceID = service.instanceID] in
+        let task = Task { [weak self, id = config.id, serviceID = service.instanceID] in
+            if initialDelay > 0 {
+                try? await Task.sleep(nanoseconds: Self.sleepNanoseconds(for: initialDelay))
+            }
+
             while !Task.isCancelled {
                 await self?.refreshServer(id: id, expectedServiceID: serviceID)
-                let rawInterval = config.pollingInterval
-                let safeInterval = rawInterval.isFinite ? rawInterval : 30.0
-                let clampedInterval = max(10.0, min(safeInterval, 3_600.0))
-                let nanos = min(clampedInterval * 1_000_000_000, Double(UInt64.max))
-                try? await Task.sleep(nanoseconds: UInt64(nanos))
+                try? await Task.sleep(nanoseconds: Self.sleepNanoseconds(for: Self.clampedPollingInterval(config.pollingInterval)))
             }
         }
+        pollingTaskBag.set(task, for: config.id)
     }
 
     // MARK: - Private
@@ -177,8 +210,7 @@ final class AppEnvironment {
     }
 
     private func stopPolling(for id: UUID) {
-        pollingTasks[id]?.cancel()
-        pollingTasks.removeValue(forKey: id)
+        pollingTaskBag.cancel(for: id)
         pollingServices.removeValue(forKey: id)
     }
 
@@ -196,6 +228,20 @@ final class AppEnvironment {
 
         if id == selectedServerID { isLoading = true }
         serverStates[id]?.isLoading = true
+
+        guard let pollPermit = await pollLimiter.acquire() else {
+            serverStates[id]?.isLoading = false
+            if id == selectedServerID { isLoading = false }
+            return
+        }
+        defer {
+            pollPermit.release()
+        }
+        guard !Task.isCancelled else {
+            serverStates[id]?.isLoading = false
+            if id == selectedServerID { isLoading = false }
+            return
+        }
 
         let includeHeavyData = forcedHeavyRefreshServerIDs.remove(id) != nil || shouldRefreshHeavyData(for: id)
         let result = await service.poll(includeHeavyData: includeHeavyData)
@@ -265,8 +311,24 @@ final class AppEnvironment {
         guard let state = serverStates[id] else { return true }
         guard let lastHeavyRefresh = state.lastHeavyRefresh else { return true }
 
-        let minimumHeavyRefreshInterval = max(60.0, config.pollingInterval)
+        let minimumHeavyRefreshInterval = max(60.0, Self.clampedPollingInterval(config.pollingInterval))
         return Date().timeIntervalSince(lastHeavyRefresh) >= minimumHeavyRefreshInterval
+    }
+
+    private static func clampedPollingInterval(_ rawInterval: Double) -> TimeInterval {
+        let safeInterval = rawInterval.isFinite ? rawInterval : 30.0
+        return max(10.0, min(safeInterval, 3_600.0))
+    }
+
+    private static func sleepNanoseconds(for interval: TimeInterval) -> UInt64 {
+        let nanos = min(interval * 1_000_000_000, Double(UInt64.max))
+        return UInt64(nanos)
+    }
+
+    private static func startupStaggerDelay(index: Int, total: Int, interval: TimeInterval) -> TimeInterval {
+        guard total > 0 else { return 0 }
+        let window = min(clampedPollingInterval(interval) * 0.8, 30.0)
+        return window * Double(index + 1) / Double(total + 1)
     }
 
     private func migrateIfNeeded() {
@@ -280,5 +342,120 @@ final class AppEnvironment {
         if let config = EnvLoader.loadFromEnvFile() {
             _ = persistServers([config])
         }
+    }
+}
+
+private final class PollingTaskBag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var tasks: [UUID: Task<Void, Never>] = [:]
+
+    func set(_ task: Task<Void, Never>, for id: UUID) {
+        let previous: Task<Void, Never>?
+        lock.lock()
+        previous = tasks.updateValue(task, forKey: id)
+        lock.unlock()
+
+        previous?.cancel()
+    }
+
+    func cancel(for id: UUID) {
+        let task: Task<Void, Never>?
+        lock.lock()
+        task = tasks.removeValue(forKey: id)
+        lock.unlock()
+
+        task?.cancel()
+    }
+
+    func cancelAll() {
+        let allTasks: [Task<Void, Never>]
+        lock.lock()
+        allTasks = Array(tasks.values)
+        tasks.removeAll()
+        lock.unlock()
+
+        allTasks.forEach { $0.cancel() }
+    }
+}
+
+private actor PollConcurrencyLimiter {
+    private let maxConcurrentPolls: Int
+    private var availablePermits: Int
+    private var waiters: [(id: UUID, continuation: CheckedContinuation<PollPermit?, Never>)] = []
+
+    init(maxConcurrentPolls: Int) {
+        let safeLimit = max(1, maxConcurrentPolls)
+        self.maxConcurrentPolls = safeLimit
+        self.availablePermits = safeLimit
+    }
+
+    func acquire() async -> PollPermit? {
+        guard !Task.isCancelled else { return nil }
+
+        if availablePermits > 0 {
+            availablePermits -= 1
+            return makePermit()
+        }
+
+        let id = UUID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                waiters.append((id, continuation))
+            }
+        } onCancel: {
+            Task {
+                await self.cancelWaiter(id: id)
+            }
+        }
+    }
+
+    private func release() {
+        guard !waiters.isEmpty else {
+            availablePermits = min(availablePermits + 1, maxConcurrentPolls)
+            return
+        }
+
+        let waiter = waiters.removeFirst()
+        waiter.continuation.resume(returning: makePermit())
+    }
+
+    private func cancelWaiter(id: UUID) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+        let waiter = waiters.remove(at: index)
+        waiter.continuation.resume(returning: nil)
+    }
+
+    private func makePermit() -> PollPermit {
+        PollPermit {
+            Task {
+                await self.release()
+            }
+        }
+    }
+}
+
+private final class PollPermit: @unchecked Sendable {
+    private let lock = NSLock()
+    private let releaseHandler: @Sendable () -> Void
+    private var didRelease = false
+
+    init(releaseHandler: @escaping @Sendable () -> Void) {
+        self.releaseHandler = releaseHandler
+    }
+
+    deinit {
+        release()
+    }
+
+    func release() {
+        lock.lock()
+        guard !didRelease else {
+            lock.unlock()
+            return
+        }
+        didRelease = true
+        lock.unlock()
+
+        releaseHandler()
     }
 }

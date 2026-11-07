@@ -3,8 +3,9 @@ import SwiftUI
 @MainActor
 struct PopoverRootView: View {
     @Environment(AppEnvironment.self) private var appEnv
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showSettings = false
-    @State private var spinning = false
+    @State private var refreshRotation = 0.0
     @State private var terminalLaunchIssue: TerminalLaunchIssue?
     @State private var terminalLaunchIssueDismissTask: Task<Void, Never>?
 
@@ -26,7 +27,10 @@ struct PopoverRootView: View {
             footer
         }
         .frame(width: 420, height: 700)
-        .onChange(of: appEnv.isLoading) { _, val in spinning = val }
+        .onChange(of: appEnv.isLoading) { _, isLoading in
+            guard isLoading else { return }
+            triggerRefreshAnimation()
+        }
         .onDisappear {
             terminalLaunchIssueDismissTask?.cancel()
         }
@@ -120,16 +124,22 @@ struct PopoverRootView: View {
                         )
                     }
                 }
-                .help("Open SSH session in \(appEnv.settings.terminalApp == "iterm" ? "iTerm2" : "Terminal.app")")
+                .help("Open SSH session in \(TerminalLauncher.displayName(for: appEnv.settings.terminalApp))")
                 .disabled({
                     guard let s = appEnv.selectedServer else { return true }
                     return s.sshHost.isEmpty || s.sshUser.isEmpty
                 }())
 
-                Button { appEnv.refreshNow() } label: {
+                Button {
+                    let wasLoading = appEnv.isLoading
+                    appEnv.refreshNow()
+                    if wasLoading {
+                        triggerRefreshAnimation()
+                    }
+                } label: {
                     Image(systemName: "arrow.clockwise").font(.callout).fontWeight(.medium)
-                        .rotationEffect(.degrees(spinning ? 360 : 0))
-                        .animation(spinning ? .linear(duration: 0.8).repeatForever(autoreverses: false) : .default, value: spinning)
+                        .rotationEffect(.degrees(refreshRotation))
+                        .animation(.linear(duration: 0.45), value: refreshRotation)
                 }
                 .buttonStyle(.plain).foregroundStyle(.secondary)
             }
@@ -162,6 +172,11 @@ struct PopoverRootView: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
+    }
+
+    private func triggerRefreshAnimation() {
+        guard !reduceMotion else { return }
+        refreshRotation += 360
     }
 
     private func presentTerminalLaunchIssue(_ issue: TerminalLaunchIssue?) {

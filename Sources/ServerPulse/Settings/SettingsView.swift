@@ -149,6 +149,7 @@ struct SettingsView: View {
                     Picker("App", selection: $terminalApp) {
                         Text("Terminal.app").tag("terminal")
                         Text("iTerm2").tag("iterm")
+                        Text("cmux").tag("cmux")
                     }
                     .pickerStyle(.segmented)
                     .font(.caption)
