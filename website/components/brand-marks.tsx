@@ -115,6 +115,27 @@ export const StackLightsIcon = (props: SvgProps) => {
   );
 };
 
+/** S4 · Ping: S1 with a signal ring around the amber light. Servers, status and pulse in one. */
+export const StackPingIcon = (props: SvgProps) => {
+  const id = useId().replace(/:/g, "");
+  return (
+    <IconBase id={id} {...props}>
+      {[247, 437, 627].map((y, i) => (
+        <g key={y}>
+          <rect x="222" y={y} width="580" height="150" rx="44" {...unit} />
+          {i === 2 && (
+            <>
+              <circle cx="702" cy={y + 75} r="56" fill="none" stroke={AMBER} strokeOpacity=".6" strokeWidth="8" />
+              <circle cx="702" cy={y + 75} r="76" fill="none" stroke={AMBER} strokeOpacity=".25" strokeWidth="6" />
+            </>
+          )}
+          <circle cx="702" cy={y + 75} r="36" fill={i === 2 ? AMBER : GREEN} />
+        </g>
+      ))}
+    </IconBase>
+  );
+};
+
 /** S2 · Duo: two taller units with big lights. Boldest at small sizes. */
 export const StackDuoIcon = (props: SvgProps) => {
   const id = useId().replace(/:/g, "");

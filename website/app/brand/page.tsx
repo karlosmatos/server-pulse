@@ -10,6 +10,7 @@ import {
   StackDuoIcon,
   StackIcon,
   StackLightsIcon,
+  StackPingIcon,
   StackSignalIcon,
 } from "@/components/brand-marks";
 import { MenuBar } from "@/components/mac";
@@ -27,6 +28,12 @@ type Concept = {
 };
 
 const simplified: Concept[] = [
+  {
+    key: "S4",
+    name: "Ping",
+    Icon: StackPingIcon,
+    body: "S1 plus a signal ring around the amber light. The rack says servers, the lights say status, and the ring is the pulse: a ping, not a heartbeat. It also marks where attention is needed.",
+  },
   {
     key: "S1",
     name: "Lights",
@@ -130,14 +137,14 @@ export default function Brand() {
         <Badge text="Brand proposal" />
         <Heading className="mt-5">Logo concepts</Heading>
         <SubHeading className="mx-auto mt-6 max-w-lg">
-          The rack won: it says servers, not health. Here it is stripped down to units and status lights, in three
-          variants, with the earlier directions below for comparison.
+          The rack says servers, not health. Here it is stripped down to units and status lights, plus Ping, which
+          brings back the pulse as a signal ring. The earlier directions are below for comparison.
         </SubHeading>
       </Container>
       <DivideX />
 
       <SectionLabel>Stack, simplified</SectionLabel>
-      <Container className="border-divide divide-divide grid grid-cols-3 divide-x border-x">
+      <Container className="border-divide divide-divide grid grid-cols-2 border-x md:grid-cols-4 md:divide-x [&>*:nth-child(odd)]:max-md:border-r [&>*:nth-child(-n+2)]:max-md:border-b [&>*]:border-divide">
         {simplified.map((c) => (
           <div key={c.key} className="flex flex-col items-center gap-3 p-6 md:p-10">
             <c.Icon className="size-20 md:size-32" />
