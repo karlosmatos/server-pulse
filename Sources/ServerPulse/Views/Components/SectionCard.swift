@@ -12,36 +12,19 @@ struct SectionCard<Content: View, Trailing: View>: View {
             HStack(spacing: 6) {
                 Image(systemName: icon)
                     .foregroundStyle(tint)
-                    .font(.caption)
-                    .fontWeight(.semibold)
+                    .font(.system(size: 11, weight: .semibold))
                 Text(title)
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.primary)
-                Spacer()
+                    .lineLimit(1)
+                Spacer(minLength: 4)
                 trailing
             }
             content
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(.quaternary.opacity(0.5))
-                .overlay(alignment: .top) {
-                    tint.opacity(0.6)
-                        .frame(height: 2)
-                        .clipShape(
-                            UnevenRoundedRectangle(
-                                topLeadingRadius: 10,
-                                bottomLeadingRadius: 0,
-                                bottomTrailingRadius: 0,
-                                topTrailingRadius: 10
-                            )
-                        )
-                }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(Color.cardFill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
@@ -52,5 +35,31 @@ extension SectionCard where Trailing == EmptyView {
         self.tint = tint
         self.trailing = { EmptyView() }()
         self.content = content()
+    }
+}
+
+/// Compact list row used by the Docker, Services and Processes cards: dot · mono name · trailing value.
+struct DotRow: View {
+    let color: Color
+    let name: String
+    var value: String? = nil
+    var valueColor: Color = .secondary
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text(name)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.primary.opacity(0.75))
+                .lineLimit(1).truncationMode(.middle)
+            Spacer(minLength: 4)
+            if let value {
+                Text(value)
+                    .font(.system(size: 11)).monospacedDigit()
+                    .foregroundStyle(valueColor)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.vertical, 3)
     }
 }

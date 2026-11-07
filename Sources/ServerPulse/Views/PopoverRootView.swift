@@ -13,8 +13,10 @@ struct PopoverRootView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            Divider().opacity(0.4)
+            if showSettings {
+                settingsHeader
+                Divider().opacity(0.4)
+            }
             if let issue = terminalLaunchIssue {
                 terminalLaunchBanner(issue)
             }
@@ -25,7 +27,6 @@ struct PopoverRootView: View {
                 mainContent
             }
 
-            Divider().opacity(0.4)
             footer
         }
         .frame(width: 420, height: 700)
@@ -42,19 +43,34 @@ struct PopoverRootView: View {
 
     private var mainContent: some View {
         ScrollView {
-            VStack(spacing: 10) {
+            VStack(spacing: 8) {
                 if appEnv.servers.count > 1 {
-                    serverPicker
+                    serverPicker.padding(.bottom, 2)
                 }
                 ServerHeaderView()
                 GaugesView()
+                containersAndServices
                 if !appEnv.processes.isEmpty { ProcessListView() }
-                if !appEnv.dockerContainers.isEmpty { DockerView() }
-                if !appEnv.systemdServices.isEmpty { SystemdServicesView() }
                 if !appEnv.workflows.isEmpty || !appEnv.recentExecutions.isEmpty { N8NView() }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
+            .padding(12)
+        }
+    }
+
+    /// Docker and systemd sit side by side when both are present, as on the website.
+    @ViewBuilder
+    private var containersAndServices: some View {
+        let hasDocker = !appEnv.dockerContainers.isEmpty
+        let hasServices = !appEnv.systemdServices.isEmpty
+        if hasDocker && hasServices {
+            HStack(alignment: .top, spacing: 8) {
+                DockerView()
+                SystemdServicesView()
+            }
+        } else if hasDocker {
+            DockerView()
+        } else if hasServices {
+            SystemdServicesView()
         }
     }
 
@@ -70,23 +86,18 @@ struct PopoverRootView: View {
                             appEnv.selectedServerID = server.id
                         }
                     } label: {
-                        HStack(spacing: 5) {
+                        HStack(spacing: 6) {
                             Circle()
                                 .fill((state?.status ?? .unknown).color)
                                 .frame(width: 6, height: 6)
                             Text(server.name)
-                                .font(.caption)
-                                .fontWeight(isSelected ? .semibold : .regular)
+                                .font(.system(size: 11.5, weight: isSelected ? .medium : .regular))
+                                .foregroundStyle(isSelected ? .primary : .secondary)
                         }
                         .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(
-                            isSelected ? Color.accentColor.opacity(0.15) : Color.secondary.opacity(0.08),
-                            in: Capsule()
-                        )
-                        .overlay(
-                            Capsule().strokeBorder(isSelected ? Color.accentColor.opacity(0.4) : .clear, lineWidth: 1)
-                        )
+                        .padding(.vertical, 4)
+                        .background(isSelected ? Color.trackFill : .clear, in: Capsule())
+                        .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
                 }
@@ -94,26 +105,49 @@ struct PopoverRootView: View {
         }
     }
 
-    private var header: some View {
+    private var settingsHeader: some View {
         HStack(spacing: 8) {
-            if showSettings {
-                headerButton("chevron.left") {
-                    withAnimation(.easeInOut(duration: 0.2)) { showSettings = false }
-                }
-                Text("Settings").font(.headline)
-            } else {
-                Image(systemName: "server.rack").foregroundStyle(.blue).font(.callout).fontWeight(.medium)
-                Text("ServerPulse").font(.headline)
+            footerButton("chevron.left", help: "Back") {
+                withAnimation(.easeInOut(duration: 0.2)) { showSettings = false }
             }
+            Text("Settings").font(.system(size: 13, weight: .semibold))
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
+    private var footer: some View {
+        HStack(spacing: 12) {
+            Button { updater.checkForUpdates() } label: {
+                Text("Check for Updates…")
+            }
+            .buttonStyle(.plain)
 
             Spacer()
 
             if !showSettings {
                 if let t = appEnv.lastUpdated, !appEnv.isLoading {
-                    Text(t, style: .relative).font(.caption2).foregroundStyle(.tertiary)
+                    Text(t, style: .relative)
+                        .monospacedDigit()
                         .contentTransition(.numericText())
                 }
-                headerButton("terminal.fill") {
+
+                Button {
+                    let wasLoading = appEnv.isLoading
+                    appEnv.refreshNow()
+                    if wasLoading {
+                        triggerRefreshAnimation()
+                    }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .rotationEffect(.degrees(refreshRotation))
+                        .animation(.linear(duration: 0.45), value: refreshRotation)
+                }
+                .buttonStyle(.plain)
+                .help("Refresh now")
+
+                footerButton("apple.terminal", help: "Open SSH session in \(TerminalLauncher.displayName(for: appEnv.settings.terminalApp))") {
                     if let config = appEnv.selectedServer {
                         presentTerminalLaunchIssue(
                             TerminalLauncher.openSSH(
@@ -126,58 +160,35 @@ struct PopoverRootView: View {
                         )
                     }
                 }
-                .help("Open SSH session in \(TerminalLauncher.displayName(for: appEnv.settings.terminalApp))")
                 .disabled({
                     guard let s = appEnv.selectedServer else { return true }
                     return s.sshHost.isEmpty || s.sshUser.isEmpty
                 }())
-
-                Button {
-                    let wasLoading = appEnv.isLoading
-                    appEnv.refreshNow()
-                    if wasLoading {
-                        triggerRefreshAnimation()
-                    }
-                } label: {
-                    Image(systemName: "arrow.clockwise").font(.callout).fontWeight(.medium)
-                        .rotationEffect(.degrees(refreshRotation))
-                        .animation(.linear(duration: 0.45), value: refreshRotation)
-                }
-                .buttonStyle(.plain).foregroundStyle(.secondary)
             }
 
-            headerButton(showSettings ? "xmark" : "gearshape") {
+            footerButton(showSettings ? "xmark" : "gearshape", help: showSettings ? "Close settings" : "Settings") {
                 withAnimation(.easeInOut(duration: 0.2)) { showSettings.toggle() }
             }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-    }
 
-    private var footer: some View {
-        HStack {
-            Button { updater.checkForUpdates() } label: {
-                Text("Check for Updates…").font(.caption).foregroundStyle(.tertiary)
+            footerButton("power", help: "Quit ServerPulse") {
+                NSApplication.shared.terminate(nil)
             }
-            .buttonStyle(.plain)
-            Spacer()
-            Button { NSApplication.shared.terminate(nil) } label: {
-                Text("Quit ServerPulse").font(.caption).foregroundStyle(.tertiary)
-            }
-            .buttonStyle(.plain)
         }
+        .font(.system(size: 11))
+        .foregroundStyle(.secondary)
         .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.top, 6)
+        .padding(.bottom, 10)
     }
 
     // MARK: - Helpers
 
-    private func headerButton(_ icon: String, action: @escaping () -> Void) -> some View {
+    private func footerButton(_ icon: String, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: icon).font(.callout).fontWeight(.medium)
+            Image(systemName: icon).font(.system(size: 12))
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
+        .help(help)
     }
 
     private func triggerRefreshAnimation() {
@@ -209,7 +220,7 @@ struct PopoverRootView: View {
     }
 
     private func terminalLaunchBanner(_ issue: TerminalLaunchIssue) -> some View {
-        let tint: Color = issue.severity == .error ? .red : .orange
+        let tint: Color = issue.severity == .error ? .down : .warn
         let icon = issue.severity == .error ? "xmark.octagon.fill" : "exclamationmark.triangle.fill"
 
         return HStack(alignment: .top, spacing: 10) {

@@ -6,56 +6,32 @@ struct DockerView: View {
 
     private var containers: [DockerContainer] { appEnv.dockerContainers }
     private var runningCount: Int { containers.reduce(into: 0) { $0 += $1.isRunning ? 1 : 0 } }
-    private var stoppedCount: Int { containers.count - runningCount }
 
     var body: some View {
-        SectionCard(icon: "shippingbox", title: "Docker", tint: .cyan) {
-            HStack(spacing: 6) {
-                CountBadge(count: runningCount, color: .green)
-                CountBadge(count: stoppedCount, color: .gray)
-            }
+        SectionCard(icon: "shippingbox", title: "Docker", tint: .accentCyan) {
+            Text("\(runningCount)/\(containers.count)")
+                .font(.system(size: 11)).monospacedDigit().foregroundStyle(.tertiary)
         } content: {
-            VStack(spacing: 6) {
+            VStack(spacing: 0) {
                 ForEach(containers) { container in
-                    ContainerRow(container: container)
-                    if container.id != containers.last?.id {
-                        Divider().opacity(0.3)
+                    if container.isRunning {
+                        DotRow(
+                            color: .brand,
+                            name: container.name,
+                            value: String(format: "%.1f%%", container.cpuPercent),
+                            valueColor: container.cpuPercent > 50 ? .warn : .secondary
+                        )
+                        .help("\(container.image) · CPU \(String(format: "%.1f", container.cpuPercent))% · MEM \(String(format: "%.1f", container.memPercent))%")
+                    } else {
+                        DotRow(
+                            color: .gray.opacity(0.5),
+                            name: container.name,
+                            value: container.status.components(separatedBy: " ").first?.lowercased() ?? "unknown"
+                        )
+                        .help(container.image)
                     }
                 }
             }
         }
-    }
-}
-
-private struct ContainerRow: View {
-    let container: DockerContainer
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: container.isRunning ? "shippingbox.fill" : "shippingbox")
-                .font(.caption2)
-                .foregroundStyle(container.isRunning ? .cyan.opacity(0.7) : .gray.opacity(0.5))
-                .frame(width: 14)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(container.name).font(.caption).fontWeight(.medium).lineLimit(1)
-                Text(container.image).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
-            }
-            Spacer()
-
-            if container.isRunning {
-                HStack(spacing: 12) {
-                    StatChip(label: "CPU", value: container.cpuPercent, warn: container.cpuPercent > 50)
-                    StatChip(label: "MEM", value: container.memPercent, warn: container.memPercent > 70)
-                }
-            } else {
-                Text(container.status.components(separatedBy: " ").first?.capitalized ?? "Unknown")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.gray)
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(Color.gray.opacity(0.12), in: Capsule())
-            }
-        }
-        .padding(.vertical, 2)
     }
 }

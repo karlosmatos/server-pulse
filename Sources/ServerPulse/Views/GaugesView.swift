@@ -5,14 +5,14 @@ struct GaugesView: View {
     @Environment(AppEnvironment.self) private var appEnv
 
     var body: some View {
-        SectionCard(icon: "gauge.with.dots.needle.33percent", title: "System", tint: .blue) {
+        SectionCard(icon: "gauge.with.dots.needle.33percent", title: "System", tint: .accentBlue) {
             if let s = appEnv.stats {
                 VStack(spacing: 10) {
-                    GaugeRow(icon: "cpu", label: "CPU", value: s.cpuUsage / 100,
+                    GaugeRow(label: "CPU", value: s.cpuUsage / 100,
                              detail: String(format: "%.1f%%", s.cpuUsage))
-                    GaugeRow(icon: "memorychip", label: "Memory", value: s.ramUsagePercent / 100,
+                    GaugeRow(label: "Memory", value: s.ramUsagePercent / 100,
                              detail: formatMemory(used: s.ramUsed, total: s.ramTotal))
-                    GaugeRow(icon: "internaldrive", label: "Disk", value: s.diskUsagePercent / 100,
+                    GaugeRow(label: "Disk", value: s.diskUsagePercent / 100,
                              detail: "\(s.diskUsed) / \(s.diskTotal)")
                 }
             } else {
@@ -25,7 +25,8 @@ struct GaugesView: View {
                         Text("Stats unavailable")
                     }
                 }
-                .font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.vertical, 4)
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity).padding(.vertical, 4)
             }
         }
     }
@@ -37,26 +38,19 @@ struct GaugesView: View {
 }
 
 private struct GaugeRow: View {
-    let icon: String
     let label: String
     let value: Double
     let detail: String
 
-    private var color: Color {
-        if value >= 0.85 { return .red }
-        if value >= 0.60 { return .orange }
-        return .primary
-    }
-
     var body: some View {
-        VStack(spacing: 5) {
-            HStack(spacing: 6) {
-                Image(systemName: icon).font(.caption2).foregroundStyle(.secondary).frame(width: 14)
-                Text(label).font(.caption).foregroundStyle(.secondary)
+        VStack(spacing: 4) {
+            HStack {
+                Text(label).foregroundStyle(.secondary)
                 Spacer()
-                Text(detail).font(.caption).fontDesign(.rounded).monospacedDigit().fontWeight(.medium)
-                    .foregroundStyle(color)
+                Text(detail).fontWeight(.medium).monospacedDigit()
+                    .foregroundStyle(value >= 0.60 ? Color.usage(value) : .primary)
             }
+            .font(.system(size: 12))
             GaugeBar(value: value)
         }
     }

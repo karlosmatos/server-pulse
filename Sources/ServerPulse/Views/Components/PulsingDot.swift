@@ -1,22 +1,25 @@
 import SwiftUI
 
+/// Solid status dot with a slow expanding "ping" ring while active.
 struct PulsingDot: View {
     let color: Color
     let isActive: Bool
-    var size: CGFloat = 10
+    var size: CGFloat = 14
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pinging = false
 
     var body: some View {
         ZStack {
-            if isActive {
+            if isActive && !reduceMotion {
                 Circle()
-                    .strokeBorder(color.opacity(0.28), lineWidth: 2)
-                    .frame(width: size * 2.0, height: size * 2.0)
+                    .fill(color)
+                    .scaleEffect(pinging ? 2 : 1)
+                    .opacity(pinging ? 0 : 0.6)
+                    .animation(.easeOut(duration: 2).repeatForever(autoreverses: false), value: pinging)
             }
-            Circle()
-                .fill(color)
-                .frame(width: size, height: size)
-                .shadow(color: color.opacity(0.5), radius: isActive ? 4 : 0)
+            Circle().fill(color)
         }
-        .frame(width: size * 2.5, height: size * 2.5)
+        .frame(width: size, height: size)
+        .onAppear { pinging = true }
     }
 }

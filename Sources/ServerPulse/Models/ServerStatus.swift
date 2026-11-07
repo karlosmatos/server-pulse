@@ -8,9 +8,9 @@ enum ServerStatus: Equatable {
 
     var color: Color {
         switch self {
-        case .online:   return .green
-        case .degraded: return .yellow
-        case .offline:  return .red
+        case .online:   return .brand
+        case .degraded: return .warn
+        case .offline:  return .down
         case .unknown:  return .gray
         }
     }
