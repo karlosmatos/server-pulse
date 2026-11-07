@@ -13,10 +13,10 @@ struct SystemdService: Identifiable {
 
         var color: Color {
             switch self {
-            case .active:   return .green
+            case .active:   return .brand
             case .inactive: return .gray
-            case .failed:   return .red
-            case .unknown:  return .orange
+            case .failed:   return .down
+            case .unknown:  return .warn
             }
         }
 

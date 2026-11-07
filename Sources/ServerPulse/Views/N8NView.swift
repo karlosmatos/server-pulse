@@ -8,16 +8,13 @@ struct N8NView: View {
     private var workflows: [N8NWorkflow] { appEnv.workflows }
     private var limit: Int { 5 }
     private var activeCount: Int { workflows.reduce(into: 0) { $0 += $1.active ? 1 : 0 } }
-    private var inactiveCount: Int { workflows.count - activeCount }
     private var visibleWorkflows: [N8NWorkflow] { expanded ? workflows : Array(workflows.prefix(limit)) }
     private var recentExecutions: ArraySlice<N8NExecution> { appEnv.recentExecutions.prefix(5) }
 
     var body: some View {
-        SectionCard(icon: "flowchart", title: "n8n", tint: .orange) {
-            HStack(spacing: 6) {
-                CountBadge(count: activeCount, color: .green)
-                CountBadge(count: inactiveCount, color: .gray)
-            }
+        SectionCard(icon: "point.3.connected.trianglepath.dotted", title: "n8n", tint: .brand) {
+            Text("\(activeCount)/\(workflows.count) active")
+                .font(.system(size: 11)).monospacedDigit().foregroundStyle(.tertiary)
         } content: {
             if workflows.isEmpty && appEnv.recentExecutions.isEmpty {
                 emptyState
@@ -35,13 +32,15 @@ struct N8NView: View {
             Image(systemName: "key").foregroundStyle(.tertiary)
             Text("Configure API key in Settings").foregroundStyle(.secondary)
         }
-        .font(.caption).frame(maxWidth: .infinity).padding(.vertical, 2)
+        .font(.system(size: 12)).frame(maxWidth: .infinity).padding(.vertical, 2)
     }
 
     @ViewBuilder
     private var workflowSection: some View {
         if !workflows.isEmpty {
-            ForEach(visibleWorkflows) { wf in WorkflowRow(workflow: wf) }
+            VStack(spacing: 0) {
+                ForEach(visibleWorkflows) { wf in WorkflowRow(workflow: wf) }
+            }
 
             if workflows.count > limit {
                 Button {
@@ -52,7 +51,7 @@ struct N8NView: View {
                             .font(.system(size: 8, weight: .semibold))
                         Text(expanded ? "Show less" : "\(workflows.count - limit) more workflows…")
                     }
-                    .font(.caption).foregroundStyle(.orange)
+                    .font(.system(size: 11)).foregroundStyle(Color.brand)
                 }
                 .buttonStyle(.plain).frame(maxWidth: .infinity).padding(.top, 2)
             }
@@ -66,10 +65,12 @@ struct N8NView: View {
 
             HStack(spacing: 4) {
                 Image(systemName: "clock.arrow.circlepath").font(.caption2).foregroundStyle(.tertiary)
-                Text("Recent").font(.caption).foregroundStyle(.secondary).fontWeight(.medium)
+                Text("Recent runs").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
             }
 
-            ForEach(recentExecutions) { exec in ExecutionRow(execution: exec) }
+            VStack(spacing: 0) {
+                ForEach(recentExecutions) { exec in ExecutionRow(execution: exec) }
+            }
         }
     }
 }
@@ -78,53 +79,48 @@ struct N8NView: View {
 
 private struct WorkflowRow: View {
     let workflow: N8NWorkflow
-    private var isActive: Bool { workflow.active }
-    private var tint: Color { isActive ? .green : .gray }
 
     var body: some View {
-        HStack(spacing: 8) {
-            Circle().fill(isActive ? tint : tint.opacity(0.4)).frame(width: 7, height: 7)
-            Text(workflow.name).font(.caption).lineLimit(1)
-            Spacer()
-            Text(isActive ? "Active" : "Inactive")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(tint)
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(tint.opacity(0.12), in: Capsule())
-        }
+        DotRow(
+            color: workflow.active ? .brand : .gray.opacity(0.5),
+            name: workflow.name,
+            value: workflow.active ? "active" : "inactive",
+            valueColor: workflow.active ? .secondary : Color.secondary.opacity(0.6)
+        )
     }
 }
 
 private struct ExecutionRow: View {
     let execution: N8NExecution
 
-    private var meta: (icon: String, color: Color) {
+    private var color: Color {
         switch execution.status {
-        case "success": ("checkmark.circle.fill", .green)
-        case "error":   ("xmark.circle.fill", .red)
-        case "running": ("arrow.clockwise.circle.fill", .blue)
-        case "waiting": ("hourglass.circle.fill", .orange)
-        default:        ("circle", .secondary)
+        case "success": .brand
+        case "error", "crashed": .down
+        case "running": .accentBlue
+        case "waiting": .warn
+        default: .gray
         }
     }
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: meta.icon).font(.caption2).foregroundStyle(meta.color).frame(width: 14)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(execution.workflowName ?? "Workflow \(execution.id)").font(.caption).lineLimit(1)
-                if let date = execution.startedAt {
-                    Text(date, style: .relative).font(.caption2).foregroundStyle(.tertiary)
-                }
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text(execution.workflowName ?? "Workflow \(execution.id)")
+                .font(.system(size: 12)).lineLimit(1)
+            Spacer(minLength: 4)
+            Text(execution.status)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(color)
+                .padding(.horizontal, 6).padding(.vertical, 1)
+                .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+            if let date = execution.startedAt {
+                Text(date, style: .relative)
+                    .font(.system(size: 11)).monospacedDigit().foregroundStyle(.tertiary)
+                    .frame(width: 64, alignment: .trailing)
+                    .lineLimit(1)
             }
-            Spacer()
-
-            Text(execution.status.capitalized)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(meta.color)
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(meta.color.opacity(0.12), in: Capsule())
         }
+        .padding(.vertical, 3)
     }
 }

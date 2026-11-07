@@ -9,9 +9,9 @@ enum Severity: Int, Comparable {
 
     var color: Color {
         switch self {
-        case .ok:       return .green
-        case .warning:  return .orange
-        case .critical: return .red
+        case .ok:       return .brand
+        case .warning:  return .warn
+        case .critical: return .down
         }
     }
 
