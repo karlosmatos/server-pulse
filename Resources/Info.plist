@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key>
-    <string>com.local.serverpulse</string>
+    <string>com.karelmaly.serverpulse</string>
     <key>CFBundleName</key>
     <string>ServerPulse</string>
     <key>CFBundleDisplayName</key>
@@ -24,5 +24,11 @@
     <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
+    <key>SUFeedURL</key>
+    <string>https://github.com/karlosmatos/server-pulse/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>Z2AxNgwQE9WVwuCoeiOvZOaQGJYt9I7aa5Npd5UKk7I=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
 </dict>
 </plist>
