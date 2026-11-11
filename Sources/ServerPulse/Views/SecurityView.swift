@@ -75,7 +75,8 @@ struct SecurityView: View {
             Spacer(minLength: 4)
             if let audited = appEnv.lastSecurityAudit {
                 // Formatted once per render, so it does not tick every second.
-                Text("checked \(audited.formatted(.relative(presentation: .named)))")
+                // English locale to match the rest of the (unlocalized) UI.
+                Text("checked \(audited.formatted(.relative(presentation: .named).locale(Locale(identifier: "en_US"))))")
                     .foregroundStyle(.tertiary)
             }
         }
