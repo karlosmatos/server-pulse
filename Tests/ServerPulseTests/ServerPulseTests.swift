@@ -565,6 +565,14 @@ struct SecurityAuditTests {
         #expect(check("ssh.vpn", in: SecurityAudit.evaluate(output: "ss ok\nlisten 0.0.0.0:22", sshPort: 22)) == nil)
     }
 
+    @Test func unreadableSSHDropInsMakeSSHChecksUnknown() {
+        let output = "sshd PermitRootLogin prohibit-password\nsshd PasswordAuthentication no\nsshdpartial"
+        let checks = SecurityAudit.evaluate(output: output, sshPort: 22)
+        #expect(check("ssh.root", in: checks)?.status == .unknown)
+        #expect(check("ssh.root", in: checks)?.detail == "needs root")
+        #expect(check("ssh.password", in: checks)?.status == .unknown)
+    }
+
     @Test func firewalledPublicSSHPassesVPNCheck() {
         let output = "ss ok\nvpn tailscale\nlisten 0.0.0.0:22\naddr 37.27.38.60\naddr 2a01:4f9:c013:9a08::1"
         let facts = SecurityAudit.parseFacts(from: output)

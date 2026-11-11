@@ -20,6 +20,8 @@ enum SecurityAudit {
       printf '%s\n' "$sp_sshd" | sed 's/^/sshd /'
     else
       cat /etc/ssh/sshd_config.d/*.conf /etc/ssh/sshd_config 2>/dev/null | sed -n '/^[[:space:]]*[Mm]atch[[:space:]]/q;s/^[[:space:]]*//;/^#/d;/^$/d;s/^/sshd /p'
+      # Drop-ins override sshd_config, so one this user can't read makes the result unreliable.
+      for f in /etc/ssh/sshd_config.d/*.conf; do [ -e "$f" ] && [ ! -r "$f" ] && { echo "sshdpartial"; break; }; done
     fi
     # ufw.conf survives `apt remove ufw`, so also require the binary.
     { [ -x /usr/sbin/ufw ] || command -v ufw >/dev/null 2>&1; } && grep -qs '^ENABLED=yes' /etc/ufw/ufw.conf && echo "firewall ufw"
@@ -58,6 +60,8 @@ enum SecurityAudit {
         var uid: Int?
         /// Lowercased sshd option -> lowercased first value; first occurrence wins, like sshd.
         var sshd: [String: String] = [:]
+        /// Some sshd drop-in files were unreadable, so `sshd` may miss overriding options.
+        var sshdPartial = false
         var firewalls: [String] = []
         var firewallRuleCount: Int?
         var intrusionPrevention: [String] = []
@@ -84,6 +88,8 @@ enum SecurityAudit {
             switch key {
             case "uid":
                 facts.uid = Int(value)
+            case "sshdpartial":
+                facts.sshdPartial = true
             case "sshd":
                 let (option, optionValue) = splitFirstWord(value)
                 let name = option.lowercased()
@@ -183,11 +189,20 @@ enum SecurityAudit {
 
     private static let sshdUnreadable = "Can't read sshd config as this user"
 
-    private static func rootLoginCheck(_ facts: Facts) -> SecurityCheck {
-        let id = "ssh.root", title = "SSH root login"
-        guard !facts.sshd.isEmpty else {
+    private static func sshdUnknownCheck(_ facts: Facts, id: String, title: String) -> SecurityCheck? {
+        if facts.sshd.isEmpty {
             return SecurityCheck(id: id, title: title, status: .unknown, detail: "no access", advice: sshdUnreadable)
         }
+        if facts.sshdPartial {
+            return SecurityCheck(id: id, title: title, status: .unknown, detail: "needs root",
+                                 advice: "Some sshd config files are readable only by root")
+        }
+        return nil
+    }
+
+    private static func rootLoginCheck(_ facts: Facts) -> SecurityCheck {
+        let id = "ssh.root", title = "SSH root login"
+        if let unknown = sshdUnknownCheck(facts, id: id, title: title) { return unknown }
         let advice = "Set PermitRootLogin no, use a sudo user"
         let explanation = "Without root login an attacker also needs a username, and admin actions are traceable through sudo. Connect ServerPulse as that user too; root-only checks then show as unknown."
         // OpenSSH default since 7.0 when the option is absent.
@@ -203,9 +218,7 @@ enum SecurityAudit {
 
     private static func passwordAuthCheck(_ facts: Facts) -> SecurityCheck {
         let id = "ssh.password", title = "SSH password login"
-        guard !facts.sshd.isEmpty else {
-            return SecurityCheck(id: id, title: title, status: .unknown, detail: "no access", advice: sshdUnreadable)
-        }
+        if let unknown = sshdUnknownCheck(facts, id: id, title: title) { return unknown }
         let passwordAuth = (facts.sshd["passwordauthentication"] ?? "yes") == "yes"
         // Keyboard-interactive through PAM also accepts passwords. Only flag it when explicit,
         // because the config-file fallback cannot know distro defaults.
