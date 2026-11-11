@@ -203,6 +203,9 @@ struct AppSettingsTests {
         let servers = settings.loadServers()
         #expect(servers.count == 1)
         #expect(servers[0].n8nAPIKey == "legacy-secret")
+        // Configs saved before the security audit existed get it enabled with nothing ignored.
+        #expect(servers[0].securityAuditEnabled)
+        #expect(servers[0].ignoredSecurityChecks.isEmpty)
         #expect(deps.keychain.values[serverID.uuidString] == "legacy-secret")
 
         let resaved = try #require(deps.defaults.data(forKey: "servers.list"))
@@ -475,7 +478,8 @@ struct SecurityAuditTests {
         #expect(check("firewall", in: checks)?.status == .pass)
         #expect(check("ips", in: checks)?.status == .pass)
         #expect(check("autoupdates", in: checks)?.status == .pass)
-        #expect(check("updates", in: checks)?.status == .fail(.critical))
+        // Automatic updates are on, so pending security updates are only a warning.
+        #expect(check("updates", in: checks)?.status == .fail(.warning))
         #expect(check("updates", in: checks)?.detail == "4 pending")
         #expect(check("updates", in: checks)?.command == "apt update && apt upgrade")
         #expect(check("reboot", in: checks)?.status == .pass)
@@ -485,8 +489,9 @@ struct SecurityAuditTests {
 
     @Test func sortsFailuresBySeverityFirst() {
         let checks = SecurityAudit.evaluate(output: ubuntuNonRoot, sshPort: 22)
-        #expect(checks.first?.id == "updates")
+        #expect(checks.first?.status != .pass)
         #expect(checks.last?.status == .pass)
+        #expect(zip(checks, checks.dropFirst()).allSatisfy { $0.rank >= $1.rank })
     }
 
     @Test func firstSshdOccurrenceWinsCaseInsensitively() {
@@ -540,6 +545,37 @@ struct SecurityAuditTests {
     @Test func ignoresCustomSshPortAndLoopback() {
         let output = "ss ok\nlisten 0.0.0.0:2222\nlisten *:443\nlisten 127.0.0.1:5432"
         let checks = SecurityAudit.evaluate(output: output, sshPort: 2222)
+        #expect(check("ports", in: checks)?.status == .pass)
+    }
+
+    @Test func pendingSecurityUpdatesAreCriticalWithoutAutomaticUpdates() {
+        let checks = SecurityAudit.evaluate(output: "pkg apt\nupdates 5 2", sshPort: 22)
+        #expect(check("updates", in: checks)?.status == .fail(.critical))
+        #expect(check("updates", in: checks)?.detail == "2 pending")
+    }
+
+    @Test func flagsPublicSSHWhenVPNIsAvailable() {
+        let output = "ss ok\nfirewall ufw\nvpn tailscale\nlisten 0.0.0.0:22"
+        let vpn = check("ssh.vpn", in: SecurityAudit.evaluate(output: output, sshPort: 22))
+        #expect(vpn?.status == .fail(.warning))
+        #expect(vpn?.command?.contains("on tailscale0") == true)
+
+        let tailnetOnly = "ss ok\nvpn tailscale\nlisten 100.64.0.1:22"
+        #expect(check("ssh.vpn", in: SecurityAudit.evaluate(output: tailnetOnly, sshPort: 22))?.status == .pass)
+        #expect(check("ssh.vpn", in: SecurityAudit.evaluate(output: "ss ok\nlisten 0.0.0.0:22", sshPort: 22)) == nil)
+    }
+
+    @Test func evaluatesMandatoryAccessControl() {
+        #expect(check("mac", in: SecurityAudit.evaluate(output: "apparmor Y", sshPort: 22))?.status == .pass)
+        #expect(check("mac", in: SecurityAudit.evaluate(output: "apparmor N", sshPort: 22))?.detail == "disabled")
+        #expect(check("mac", in: SecurityAudit.evaluate(output: "selinux Permissive", sshPort: 22))?.detail == "permissive")
+        #expect(check("mac", in: SecurityAudit.evaluate(output: "selinux Enforcing", sshPort: 22))?.status == .pass)
+        #expect(check("mac", in: SecurityAudit.evaluate(output: "uid 0", sshPort: 22)) == nil)
+    }
+
+    @Test func flagsExposedDockerAPISeparatelyFromPorts() {
+        let checks = SecurityAudit.evaluate(output: "ss ok\nlisten 0.0.0.0:2375", sshPort: 22)
+        #expect(check("docker.api", in: checks)?.status == .fail(.critical))
         #expect(check("ports", in: checks)?.status == .pass)
     }
 

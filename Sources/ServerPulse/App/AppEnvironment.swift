@@ -137,6 +137,12 @@ final class AppEnvironment {
         list[idx] = config
         guard persistServers(list) else { return }
 
+        if !config.securityAuditEnabled {
+            // Drop stale results so re-enabling triggers a fresh audit.
+            serverStates[config.id]?.securityChecks = []
+            serverStates[config.id]?.lastSecurityAudit = nil
+        }
+
         stopPolling(for: config.id)
         startPolling(for: config)
 

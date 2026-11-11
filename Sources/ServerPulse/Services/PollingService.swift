@@ -104,7 +104,7 @@ struct PollingService {
         result.didRefreshHeavyData = includeHeavyData
 
         // Runs after the snapshot so it reuses the SSH ControlMaster connection.
-        if includeSecurityAudit, snapshot != nil,
+        if includeSecurityAudit, config.securityAuditEnabled, snapshot != nil,
            let auditOutput = try? await ssh.run(SecurityAudit.command) {
             result.securityChecks = SecurityAudit.evaluate(output: auditOutput, sshPort: config.sshPort)
         }

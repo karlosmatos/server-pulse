@@ -5,6 +5,9 @@ enum SecurityAudit {
     /// How often the audit re-runs on its own. A manual refresh also re-runs it.
     static let refreshInterval: TimeInterval = 6 * 60 * 60
 
+    /// Unauthenticated Docker Engine API port.
+    private static let dockerAPIPort = 2375
+
     /// Ports that are expected to be reachable from the internet.
     private static let expectedPublicPorts: Set<Int> = [22, 80, 443]
 
@@ -41,6 +44,10 @@ enum SecurityAudit {
       echo "ss ok"
       ss -Htln 2>/dev/null | awk '{ print "listen " $4 }'
     fi
+    systemctl is-active --quiet tailscaled 2>/dev/null && echo "vpn tailscale"
+    ip -o link show type wireguard 2>/dev/null | head -1 | awk '{ print "vpn wireguard" }'
+    [ -r /sys/module/apparmor/parameters/enabled ] && echo "apparmor $(cat /sys/module/apparmor/parameters/enabled)"
+    command -v getenforce >/dev/null 2>&1 && echo "selinux $(getenforce 2>/dev/null)"
     true
     """#
 
@@ -62,6 +69,9 @@ enum SecurityAudit {
         var uidZeroAccounts: [String] = []
         var hasSS = false
         var listenAddresses: [String] = []
+        var vpns: [String] = []
+        var appArmor: String?
+        var seLinux: String?
     }
 
     static func parseFacts(from output: String) -> Facts {
@@ -103,6 +113,12 @@ enum SecurityAudit {
                 facts.hasSS = true
             case "listen":
                 facts.listenAddresses.append(value)
+            case "vpn":
+                facts.vpns.append(value)
+            case "apparmor":
+                facts.appArmor = value
+            case "selinux":
+                facts.seLinux = value.lowercased()
             default:
                 continue
             }
@@ -127,6 +143,9 @@ enum SecurityAudit {
             rebootCheck(facts),
             uidZeroCheck(facts),
             publicPortsCheck(facts, sshPort: sshPort),
+            dockerAPICheck(facts),
+            vpnSSHCheck(facts, sshPort: sshPort),
+            accessControlCheck(facts),
         ]
         return checks.compactMap { $0 }.sorted { $0.rank > $1.rank }
     }
@@ -203,12 +222,24 @@ enum SecurityAudit {
         )
     }
 
-    private static func automaticUpdatesCheck(_ facts: Facts) -> SecurityCheck? {
-        let id = "autoupdates", title = "Automatic updates"
+    private static func automaticUpdatesEnabled(_ facts: Facts) -> Bool {
         switch facts.packageManager {
         case "apt":
             let periodic = facts.unattendedPeriodic ?? "0"
-            if facts.unattendedInstalled, periodic != "0", !periodic.isEmpty {
+            return facts.unattendedInstalled && periodic != "0" && !periodic.isEmpty
+        case "dnf":
+            return !facts.dnfAutomaticTimers.isEmpty
+        default:
+            return false
+        }
+    }
+
+    private static func automaticUpdatesCheck(_ facts: Facts) -> SecurityCheck? {
+        let id = "autoupdates", title = "Automatic updates"
+        let enabled = automaticUpdatesEnabled(facts)
+        switch facts.packageManager {
+        case "apt":
+            if enabled {
                 return SecurityCheck(id: id, title: title, status: .pass, detail: "enabled")
             }
             return SecurityCheck(
@@ -217,7 +248,7 @@ enum SecurityAudit {
                 command: "apt install unattended-upgrades && dpkg-reconfigure -plow unattended-upgrades"
             )
         case "dnf":
-            if !facts.dnfAutomaticTimers.isEmpty {
+            if enabled {
                 return SecurityCheck(id: id, title: title, status: .pass, detail: "enabled")
             }
             return SecurityCheck(
@@ -233,8 +264,15 @@ enum SecurityAudit {
         guard let updates = facts.pendingUpdates else { return nil }
         let id = "updates", title = "Security updates"
         guard updates.security == 0 else {
+            // With automatic updates the backlog is usually just waiting for the next daily run.
+            let automatic = automaticUpdatesEnabled(facts)
             return SecurityCheck(
-                id: id, title: title, status: .fail(.critical), detail: "\(updates.security) pending",
+                id: id, title: title,
+                status: .fail(automatic ? .warning : .critical),
+                detail: "\(updates.security) pending",
+                advice: automatic
+                    ? "unattended-upgrades should install these on its next daily run"
+                    : "Automatic updates are off, so these stay unpatched until you install them",
                 command: "apt update && apt upgrade"
             )
         }
@@ -270,7 +308,11 @@ enum SecurityAudit {
         guard facts.hasSS else { return nil }
         let id = "ports", title = "Public ports"
         let allowed = expectedPublicPorts.union([sshPort])
-        let exposed = Set(facts.listenAddresses.compactMap(publicPort)).subtracting(allowed).sorted()
+        // The Docker API has its own, critical check.
+        let exposed = Set(facts.listenAddresses.compactMap(publicPort))
+            .subtracting(allowed)
+            .subtracting([dockerAPIPort])
+            .sorted()
         guard !exposed.isEmpty else {
             return SecurityCheck(id: id, title: title, status: .pass, detail: "SSH/HTTP only")
         }
@@ -279,6 +321,53 @@ enum SecurityAudit {
         return SecurityCheck(
             id: id, title: title, status: .fail(.warning), detail: "\(list)\(more)",
             advice: "Listening on all interfaces. Bind to 127.0.0.1 or publish Docker ports as 127.0.0.1:port:port. Docker-published ports bypass ufw and INPUT rules"
+        )
+    }
+
+    private static func dockerAPICheck(_ facts: Facts) -> SecurityCheck? {
+        guard facts.listenAddresses.compactMap(publicPort).contains(dockerAPIPort) else { return nil }
+        return SecurityCheck(
+            id: "docker.api", title: "Docker API", status: .fail(.critical), detail: "\(dockerAPIPort) open",
+            advice: "The unauthenticated Docker API gives anyone root on this host. Remove the tcp:// host from the dockerd config"
+        )
+    }
+
+    private static func vpnSSHCheck(_ facts: Facts, sshPort: Int) -> SecurityCheck? {
+        guard let vpn = facts.vpns.first, facts.hasSS else { return nil }
+        let id = "ssh.vpn", title = "SSH over \(vpn.capitalized)"
+        let sshIsPublic = facts.listenAddresses.compactMap(publicPort).contains(sshPort)
+        guard sshIsPublic else {
+            return SecurityCheck(id: id, title: title, status: .pass, detail: "VPN only")
+        }
+        let iface = vpn == "tailscale" ? "tailscale0" : "wg0"
+        return SecurityCheck(
+            id: id, title: title, status: .fail(.warning), detail: "SSH public",
+            advice: "\(vpn.capitalized) is running, but SSH also accepts connections from the internet. Allow SSH only on \(iface) and point ServerPulse at the VPN address. Ignore this if your firewall already limits SSH",
+            command: facts.firewalls.contains("ufw")
+                ? "ufw allow in on \(iface) to any port \(sshPort) proto tcp && ufw delete allow OpenSSH"
+                : nil
+        )
+    }
+
+    private static func accessControlCheck(_ facts: Facts) -> SecurityCheck? {
+        let id = "mac", title = "AppArmor/SELinux"
+        if facts.seLinux == "enforcing" {
+            return SecurityCheck(id: id, title: title, status: .pass, detail: "SELinux")
+        }
+        if facts.appArmor == "Y" {
+            return SecurityCheck(id: id, title: title, status: .pass, detail: "AppArmor")
+        }
+        if facts.seLinux == "permissive" {
+            return SecurityCheck(
+                id: id, title: title, status: .fail(.warning), detail: "permissive",
+                advice: "SELinux only logs violations. Set SELINUX=enforcing in /etc/selinux/config",
+                command: "setenforce 1"
+            )
+        }
+        guard facts.appArmor != nil || facts.seLinux != nil else { return nil }
+        return SecurityCheck(
+            id: id, title: title, status: .fail(.warning), detail: "disabled",
+            advice: "Mandatory access control limits what a compromised service can do. Re-enable AppArmor or SELinux"
         )
     }
 

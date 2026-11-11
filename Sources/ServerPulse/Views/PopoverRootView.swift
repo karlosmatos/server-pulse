@@ -50,7 +50,9 @@ struct PopoverRootView: View {
                 ServerHeaderView()
                 GaugesView()
                 containersAndServices
-                if !appEnv.securityChecks.isEmpty { SecurityView() }
+                if appEnv.selectedServer?.securityAuditEnabled == true, !appEnv.securityChecks.isEmpty {
+                    SecurityView()
+                }
                 if !appEnv.processes.isEmpty { ProcessListView() }
                 if !appEnv.workflows.isEmpty || !appEnv.recentExecutions.isEmpty { N8NView() }
             }

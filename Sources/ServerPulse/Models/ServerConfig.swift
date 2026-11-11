@@ -23,13 +23,14 @@ struct ServerConfig: Codable, Identifiable, Sendable {
     var systemdServices: String
 
     // Security audit
+    var securityAuditEnabled: Bool = true
     var ignoredSecurityChecks: [String] = []
 
     private enum CodingKeys: String, CodingKey {
         case id, name, sshHost, sshUser, sshKeyPath, sshPort
         case n8nBaseURL, pollingInterval, processCount
         case processFilter, dockerEnabled, systemdServices
-        case ignoredSecurityChecks
+        case securityAuditEnabled, ignoredSecurityChecks
         // n8nAPIKey intentionally omitted from encoding — stored in Keychain
     }
 
@@ -49,6 +50,7 @@ struct ServerConfig: Codable, Identifiable, Sendable {
         processFilter    = try c.decode(String.self, forKey: .processFilter)
         dockerEnabled    = try c.decode(Bool.self,   forKey: .dockerEnabled)
         systemdServices  = try c.decode(String.self, forKey: .systemdServices)
+        securityAuditEnabled = try c.decodeIfPresent(Bool.self, forKey: .securityAuditEnabled) ?? true
         ignoredSecurityChecks = try c.decodeIfPresent([String].self, forKey: .ignoredSecurityChecks) ?? []
 
         // Legacy field — read if present so old data can be migrated to Keychain.
