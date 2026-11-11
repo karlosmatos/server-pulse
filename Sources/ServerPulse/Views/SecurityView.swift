@@ -7,6 +7,7 @@ struct SecurityView: View {
     @State private var showPassed = false
     /// At most one expanded row keeps the card short.
     @State private var expandedID: String?
+    @State private var didCopyPrompt = false
 
     private var ignoredIDs: Set<String> { Set(appEnv.selectedServer?.ignoredSecurityChecks ?? []) }
     private var active: [SecurityCheck] { appEnv.activeSecurityChecks }
@@ -27,7 +28,8 @@ struct SecurityView: View {
                         isIgnored: false,
                         isExpanded: expandedID == check.id,
                         onToggleExpand: { toggleExpanded(check.id) },
-                        onToggleIgnore: { appEnv.setSecurityCheck(check.id, ignored: true) }
+                        onToggleIgnore: { appEnv.setSecurityCheck(check.id, ignored: true) },
+                        onCopyPrompt: { copyPrompt(for: [check]) }
                     )
                 }
 
@@ -84,6 +86,20 @@ struct SecurityView: View {
                 .buttonStyle(.plain)
             }
             Spacer(minLength: 4)
+            if !attention.isEmpty {
+                Button { copyPrompt(for: attention) } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: didCopyPrompt ? "checkmark" : "sparkles")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text(didCopyPrompt ? "Copied" : "Ask AI")
+                    }
+                    .foregroundStyle(didCopyPrompt ? Color.brand : .secondary)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Copy a prompt for Claude, Codex or another AI agent to plan fixes")
+                Text("·").foregroundStyle(.tertiary)
+            }
             if let audited = appEnv.lastSecurityAudit {
                 // Formatted once per render, so it does not tick every second.
                 // English locale to match the rest of the (unlocalized) UI.
@@ -102,6 +118,16 @@ struct SecurityView: View {
         return parts.joined(separator: " · ")
     }
 
+    private func copyPrompt(for issues: [SecurityCheck]) {
+        guard let server = appEnv.selectedServer else { return }
+        FixCommandView.copy(SecurityPrompt.build(server: server, issues: issues, passed: passed))
+        didCopyPrompt = true
+        Task {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            didCopyPrompt = false
+        }
+    }
+
     private func toggleExpanded(_ id: String) {
         withAnimation(.easeInOut(duration: 0.15)) {
             expandedID = expandedID == id ? nil : id
@@ -117,6 +143,8 @@ private struct SecurityCheckRow: View {
     var onToggleExpand: (() -> Void)? = nil
     /// nil hides the ignore button.
     var onToggleIgnore: (() -> Void)? = nil
+    /// nil hides the "Copy AI Prompt" menu item.
+    var onCopyPrompt: (() -> Void)? = nil
     @State private var isHovering = false
 
     private var color: Color {
@@ -152,6 +180,9 @@ private struct SecurityCheckRow: View {
             }
             if let command = check.command {
                 Button("Copy Fix Command") { FixCommandView.copy(command) }
+            }
+            if let onCopyPrompt {
+                Button("Copy AI Prompt", action: onCopyPrompt)
             }
         }
     }

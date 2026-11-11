@@ -587,3 +587,40 @@ struct SecurityAuditTests {
         #expect(SecurityAudit.publicPort(fromListenAddress: "[fd7a::1]%tailscale0:57500") == nil)
     }
 }
+
+@Suite("SecurityPrompt")
+struct SecurityPromptTests {
+    private let server = ServerConfig(name: "prod", sshHost: "10.0.0.5", sshUser: "deploy")
+
+    @Test func includesFindingsAccessAndSafetyRules() {
+        let issue = SecurityCheck(
+            id: "ssh.root", title: "SSH root login", status: .fail(.critical), detail: "password allowed",
+            advice: "Disable root login", explanation: "Bots brute-force root.",
+            command: "sed -i 's/^PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config"
+        )
+        let ok = SecurityCheck(id: "mac", title: "AppArmor/SELinux", status: .pass, detail: "AppArmor")
+        let prompt = SecurityPrompt.build(server: server, issues: [issue], passed: [ok])
+
+        #expect(prompt.contains("\"prod\""))
+        #expect(prompt.contains("`ssh deploy@10.0.0.5`"))
+        #expect(prompt.contains("### SSH root login — critical: password allowed"))
+        #expect(prompt.contains("- Advice: Disable root login"))
+        #expect(prompt.contains("- Context: Bots brute-force root."))
+        #expect(prompt.contains("- Suggested fix: `sed -i"))
+        #expect(prompt.contains("Already OK: AppArmor/SELinux (AppArmor)."))
+        #expect(prompt.contains("Never lock me out"))
+        #expect(prompt.contains("until I approve"))
+    }
+
+    @Test func customPortAndOptionalFields() {
+        var custom = server
+        custom.sshPort = 2222
+        let issue = SecurityCheck(id: "firewall", title: "Firewall", status: .unknown, detail: "needs root")
+        let prompt = SecurityPrompt.build(server: custom, issues: [issue], passed: [])
+
+        #expect(prompt.contains("`ssh -p 2222 deploy@10.0.0.5`"))
+        #expect(prompt.contains("### Firewall — unknown: needs root"))
+        #expect(!prompt.contains("- Advice:"))
+        #expect(!prompt.contains("Already OK"))
+    }
+}
