@@ -10,6 +10,8 @@ struct ServerState {
     var recentExecutions: [N8NExecution] = []
     var lastUpdated: Date?
     var lastHeavyRefresh: Date?
+    var securityChecks: [SecurityCheck] = []
+    var lastSecurityAudit: Date?
     var errorMessage: String?
     var isLoading: Bool = false
 }

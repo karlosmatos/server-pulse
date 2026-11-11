@@ -413,3 +413,119 @@ private final class MockKeychainStore: KeychainStoring {
         values[account]
     }
 }
+
+@Suite("SecurityAudit")
+struct SecurityAuditTests {
+
+    /// Real output from a non-root user on Ubuntu (sshd_config fallback, no `sshd -T`).
+    private let ubuntuNonRoot = """
+    uid 1000
+    sshd Include /etc/ssh/sshd_config.d/*.conf
+    sshd PermitRootLogin prohibit-password
+    sshd PasswordAuthentication no
+    sshd KbdInteractiveAuthentication no
+    sshd UsePAM yes
+    sshd Subsystem\tsftp\t/usr/lib/openssh/sftp-server
+    firewall ufw
+    ips fail2ban
+    pkg apt
+    uu installed
+    uu periodic 1
+    updates 101 4
+    reboot no
+    uid0 root
+    ss ok
+    listen 127.0.0.1:20241
+    listen 0.0.0.0:22
+    listen 127.0.0.53%lo:53
+    listen 0.0.0.0:5678
+    listen [::]:22
+    listen [::]:5678
+    """
+
+    private func check(_ id: String, in checks: [SecurityCheck]) -> SecurityCheck? {
+        checks.first { $0.id == id }
+    }
+
+    @Test func evaluatesRealUbuntuOutput() {
+        let checks = SecurityAudit.evaluate(output: ubuntuNonRoot, sshPort: 22)
+        #expect(check("ssh.root", in: checks)?.status == .fail(.warning))
+        #expect(check("ssh.password", in: checks)?.status == .pass)
+        #expect(check("firewall", in: checks)?.status == .pass)
+        #expect(check("ips", in: checks)?.status == .pass)
+        #expect(check("autoupdates", in: checks)?.status == .pass)
+        #expect(check("updates", in: checks)?.status == .fail(.critical))
+        #expect(check("updates", in: checks)?.detail == "4 security updates pending")
+        #expect(check("reboot", in: checks)?.status == .pass)
+        #expect(check("uid0", in: checks)?.status == .pass)
+        #expect(check("ports", in: checks)?.detail == "Listening on all interfaces: 5678")
+    }
+
+    @Test func sortsFailuresBySeverityFirst() {
+        let checks = SecurityAudit.evaluate(output: ubuntuNonRoot, sshPort: 22)
+        #expect(checks.first?.id == "updates")
+        #expect(checks.last?.status == .pass)
+    }
+
+    @Test func firstSshdOccurrenceWinsCaseInsensitively() {
+        let facts = SecurityAudit.parseFacts(from: "sshd PasswordAuthentication NO\nsshd passwordauthentication yes")
+        #expect(facts.sshd["passwordauthentication"] == "no")
+    }
+
+    @Test func appliesOpenSSHDefaultsWhenOptionsAreMissing() {
+        let checks = SecurityAudit.evaluate(output: "uid 0\nsshd Port 22", sshPort: 22)
+        #expect(check("ssh.root", in: checks)?.status == .fail(.warning))
+        #expect(check("ssh.password", in: checks)?.status == .fail(.critical))
+    }
+
+    @Test func flagsKeyboardInteractiveLoginThroughPAM() {
+        let output = "sshd passwordauthentication no\nsshd kbdinteractiveauthentication yes\nsshd usepam yes"
+        let checks = SecurityAudit.evaluate(output: output, sshPort: 22)
+        #expect(check("ssh.password", in: checks)?.status == .fail(.critical))
+    }
+
+    @Test func reportsUnknownWithoutRootOrSshdAccess() {
+        let checks = SecurityAudit.evaluate(output: "uid 1000", sshPort: 22)
+        #expect(check("ssh.root", in: checks)?.status == .unknown)
+        #expect(check("firewall", in: checks)?.status == .unknown)
+    }
+
+    @Test func rootWithoutFirewallFails() {
+        let checks = SecurityAudit.evaluate(output: "uid 0\nfwrules 0", sshPort: 22)
+        #expect(check("firewall", in: checks)?.status == .fail(.warning))
+        let filtered = SecurityAudit.evaluate(output: "uid 0\nfwrules 3", sshPort: 22)
+        #expect(check("firewall", in: filtered)?.status == .pass)
+    }
+
+    @Test func omitsChecksThatDoNotApply() {
+        let checks = SecurityAudit.evaluate(output: "uid 0", sshPort: 22)
+        #expect(check("autoupdates", in: checks) == nil)
+        #expect(check("updates", in: checks) == nil)
+        #expect(check("reboot", in: checks) == nil)
+        #expect(check("ports", in: checks) == nil)
+    }
+
+    @Test func flagsExtraUidZeroAccounts() {
+        let checks = SecurityAudit.evaluate(output: "uid0 root\nuid0 toor", sshPort: 22)
+        #expect(check("uid0", in: checks)?.detail == "UID 0 besides root: toor")
+    }
+
+    @Test func detectsDisabledUnattendedUpgrades() {
+        let checks = SecurityAudit.evaluate(output: "pkg apt\nuu installed\nuu periodic 0", sshPort: 22)
+        #expect(check("autoupdates", in: checks)?.detail == "unattended-upgrades is disabled")
+    }
+
+    @Test func ignoresCustomSshPortAndLoopback() {
+        let output = "ss ok\nlisten 0.0.0.0:2222\nlisten *:443\nlisten 127.0.0.1:5432"
+        let checks = SecurityAudit.evaluate(output: output, sshPort: 2222)
+        #expect(check("ports", in: checks)?.status == .pass)
+    }
+
+    @Test func parsesPublicListenAddresses() {
+        #expect(SecurityAudit.publicPort(fromListenAddress: "0.0.0.0:5432") == 5432)
+        #expect(SecurityAudit.publicPort(fromListenAddress: "[::]:80") == 80)
+        #expect(SecurityAudit.publicPort(fromListenAddress: "*:22") == 22)
+        #expect(SecurityAudit.publicPort(fromListenAddress: "127.0.0.1:5432") == nil)
+        #expect(SecurityAudit.publicPort(fromListenAddress: "[fd7a::1]%tailscale0:57500") == nil)
+    }
+}

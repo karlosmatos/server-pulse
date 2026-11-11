@@ -11,6 +11,8 @@ final class AppEnvironment {
     var systemdServices: [SystemdService] = []
     var workflows: [N8NWorkflow] = []
     var recentExecutions: [N8NExecution] = []
+    var securityChecks: [SecurityCheck] = []
+    var lastSecurityAudit: Date?
     var lastUpdated: Date?
     var errorMessage: String?
     var isLoading: Bool = false
@@ -243,8 +245,11 @@ final class AppEnvironment {
             return
         }
 
-        let includeHeavyData = forcedHeavyRefreshServerIDs.remove(id) != nil || shouldRefreshHeavyData(for: id)
-        let result = await service.poll(includeHeavyData: includeHeavyData)
+        let isForced = forcedHeavyRefreshServerIDs.remove(id) != nil
+        let result = await service.poll(
+            includeHeavyData: isForced || shouldRefreshHeavyData(for: id),
+            includeSecurityAudit: isForced || shouldRefreshSecurityAudit(for: id)
+        )
 
         guard !Task.isCancelled,
               let activeService = pollingServices[id],
@@ -264,6 +269,10 @@ final class AppEnvironment {
             state.workflows = result.workflows
             state.recentExecutions = result.recentExecutions
             state.lastHeavyRefresh = Date()
+        }
+        if let checks = result.securityChecks {
+            state.securityChecks = checks
+            state.lastSecurityAudit = Date()
         }
         state.lastUpdated = Date()
         state.errorMessage = result.errorMessage
@@ -288,6 +297,8 @@ final class AppEnvironment {
             systemdServices = []
             workflows = []
             recentExecutions = []
+            securityChecks = []
+            lastSecurityAudit = nil
             lastUpdated = nil
             errorMessage = nil
             isLoading = false
@@ -301,6 +312,8 @@ final class AppEnvironment {
         systemdServices = state.systemdServices
         workflows = state.workflows
         recentExecutions = state.recentExecutions
+        securityChecks = state.securityChecks
+        lastSecurityAudit = state.lastSecurityAudit
         lastUpdated = state.lastUpdated
         errorMessage = state.errorMessage
         isLoading = state.isLoading
@@ -313,6 +326,11 @@ final class AppEnvironment {
 
         let minimumHeavyRefreshInterval = max(60.0, Self.clampedPollingInterval(config.pollingInterval))
         return Date().timeIntervalSince(lastHeavyRefresh) >= minimumHeavyRefreshInterval
+    }
+
+    private func shouldRefreshSecurityAudit(for id: UUID) -> Bool {
+        guard let lastAudit = serverStates[id]?.lastSecurityAudit else { return true }
+        return Date().timeIntervalSince(lastAudit) >= SecurityAudit.refreshInterval
     }
 
     private static func clampedPollingInterval(_ rawInterval: Double) -> TimeInterval {
