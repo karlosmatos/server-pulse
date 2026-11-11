@@ -565,6 +565,54 @@ struct SecurityAuditTests {
         #expect(check("ssh.vpn", in: SecurityAudit.evaluate(output: "ss ok\nlisten 0.0.0.0:22", sshPort: 22)) == nil)
     }
 
+    @Test func firewalledPublicSSHPassesVPNCheck() {
+        let output = "ss ok\nvpn tailscale\nlisten 0.0.0.0:22\naddr 37.27.38.60\naddr 2a01:4f9:c013:9a08::1"
+        let facts = SecurityAudit.parseFacts(from: output)
+        #expect(SecurityAudit.needsSSHProbe(facts, sshPort: 22))
+        #expect(!SecurityAudit.needsSSHProbe(facts, sshPort: 2222))
+
+        func vpnStatus(_ probes: [SecurityAudit.SSHProbe]) -> SecurityCheck? {
+            check("ssh.vpn", in: SecurityAudit.evaluate(facts: facts, sshPort: 22, sshProbes: probes))
+        }
+        #expect(vpnStatus([.blocked, .blocked])?.status == .pass)
+        #expect(vpnStatus([.blocked, .blocked])?.detail == "firewalled")
+        // A Mac without IPv6 can still vouch for the IPv4 path.
+        #expect(vpnStatus([.blocked, .inconclusive])?.status == .pass)
+        #expect(vpnStatus([.blocked, .open])?.status == .fail(.warning))
+        #expect(vpnStatus([.inconclusive])?.status == .fail(.warning))
+        #expect(vpnStatus([])?.status == .fail(.warning))
+    }
+
+    @Test func keepsOnlyPublicAddressesForProbing() {
+        let facts = SecurityAudit.parseFacts(from: """
+        addr 37.27.38.60
+        addr 37.27.38.60
+        addr 100.103.67.69
+        addr 172.17.0.1
+        addr 10.0.0.5
+        addr 192.168.1.2
+        addr 2a01:4f9:c013:9a08::1
+        addr fd7a:115c:a1e0::1601:43ee
+        addr fe80::1
+        addr evil.example.com
+        addr 1.2.3.4; rm -rf /
+        """)
+        #expect(facts.publicAddresses == ["37.27.38.60", "2a01:4f9:c013:9a08::1"])
+
+        let many = (1...6).map { "addr 8.8.8.\($0)" }.joined(separator: "\n")
+        #expect(SecurityAudit.parseFacts(from: many).publicAddresses.count == 4)
+    }
+
+    @Test func classifiesProbeErrors() {
+        #expect(PortProbe.classify(.posix(.ECONNREFUSED)) == .blocked)
+        #expect(PortProbe.classify(.posix(.ETIMEDOUT)) == .blocked)
+        #expect(PortProbe.classify(.posix(.ENETUNREACH)) == .inconclusive)
+    }
+
+    @Test func probeOfClosedLocalPortIsBlocked() async {
+        #expect(await PortProbe.probe(host: "127.0.0.1", port: 1) == .blocked)
+    }
+
     @Test func evaluatesMandatoryAccessControl() {
         #expect(check("mac", in: SecurityAudit.evaluate(output: "apparmor Y", sshPort: 22))?.status == .pass)
         #expect(check("mac", in: SecurityAudit.evaluate(output: "apparmor N", sshPort: 22))?.detail == "disabled")

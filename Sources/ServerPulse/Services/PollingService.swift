@@ -106,7 +106,11 @@ struct PollingService {
         // Runs after the snapshot so it reuses the SSH ControlMaster connection.
         if includeSecurityAudit, config.securityAuditEnabled, snapshot != nil,
            let auditOutput = try? await ssh.run(SecurityAudit.command) {
-            result.securityChecks = SecurityAudit.evaluate(output: auditOutput, sshPort: config.sshPort)
+            let facts = SecurityAudit.parseFacts(from: auditOutput)
+            let sshProbes = SecurityAudit.needsSSHProbe(facts, sshPort: config.sshPort)
+                ? await PortProbe.probeAll(hosts: facts.publicAddresses, port: config.sshPort)
+                : []
+            result.securityChecks = SecurityAudit.evaluate(facts: facts, sshPort: config.sshPort, sshProbes: sshProbes)
         }
 
         let totalDuration = ProcessInfo.processInfo.systemUptime - pollStart

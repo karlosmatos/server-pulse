@@ -46,6 +46,7 @@ enum SecurityAudit {
     fi
     systemctl is-active --quiet tailscaled 2>/dev/null && echo "vpn tailscale"
     ip -o link show type wireguard 2>/dev/null | head -1 | awk '{ print "vpn wireguard" }'
+    ip -o addr show scope global 2>/dev/null | awk '{ sub(/\/.*/, "", $4); print "addr " $4 }'
     [ -r /sys/module/apparmor/parameters/enabled ] && echo "apparmor $(cat /sys/module/apparmor/parameters/enabled)"
     command -v getenforce >/dev/null 2>&1 && echo "selinux $(getenforce 2>/dev/null)"
     true
@@ -70,6 +71,8 @@ enum SecurityAudit {
         var hasSS = false
         var listenAddresses: [String] = []
         var vpns: [String] = []
+        /// Internet-routable addresses of the server, probed from this Mac to see if SSH is firewalled.
+        var publicAddresses: [String] = []
         var appArmor: String?
         var seLinux: String?
     }
@@ -117,6 +120,10 @@ enum SecurityAudit {
                 facts.listenAddresses.append(value)
             case "vpn" where ["tailscale", "wireguard"].contains(value):
                 facts.vpns.append(value)
+            // The Mac connects to these, so only public IP literals pass, and only a few.
+            case "addr" where facts.publicAddresses.count < maxProbedAddresses
+                && !facts.publicAddresses.contains(value) && isPublicIP(value):
+                facts.publicAddresses.append(value)
             case "apparmor" where ["Y", "N"].contains(value):
                 facts.appArmor = value
             case "selinux" where ["enforcing", "permissive", "disabled"].contains(value.lowercased()):
@@ -135,11 +142,28 @@ enum SecurityAudit {
         name.range(of: #"^[A-Za-z_][A-Za-z0-9_.-]{0,31}$"#, options: .regularExpression) != nil
     }
 
-    static func evaluate(output: String, sshPort: Int) -> [SecurityCheck] {
-        evaluate(facts: parseFacts(from: output), sshPort: sshPort)
+    /// Outcome of a TCP connect from this Mac to the server's public SSH port.
+    enum SSHProbe: Equatable {
+        case open
+        /// Timed out or refused: a firewall drops or rejects it.
+        case blocked
+        /// The Mac itself could not try, e.g. it has no IPv6 route.
+        case inconclusive
     }
 
-    static func evaluate(facts: Facts, sshPort: Int) -> [SecurityCheck] {
+    private static let maxProbedAddresses = 4
+
+    /// Whether the VPN check needs the Mac to test if public SSH is actually reachable.
+    /// The audit never uses sudo, so firewall rules are invisible to non-root users.
+    static func needsSSHProbe(_ facts: Facts, sshPort: Int) -> Bool {
+        !facts.vpns.isEmpty && !facts.publicAddresses.isEmpty && sshListensPublicly(facts, sshPort: sshPort)
+    }
+
+    static func evaluate(output: String, sshPort: Int, sshProbes: [SSHProbe] = []) -> [SecurityCheck] {
+        evaluate(facts: parseFacts(from: output), sshPort: sshPort, sshProbes: sshProbes)
+    }
+
+    static func evaluate(facts: Facts, sshPort: Int, sshProbes: [SSHProbe] = []) -> [SecurityCheck] {
         let checks: [SecurityCheck?] = [
             rootLoginCheck(facts),
             passwordAuthCheck(facts),
@@ -151,7 +175,7 @@ enum SecurityAudit {
             uidZeroCheck(facts),
             publicPortsCheck(facts, sshPort: sshPort),
             dockerAPICheck(facts),
-            vpnSSHCheck(facts, sshPort: sshPort),
+            vpnSSHCheck(facts, sshPort: sshPort, probes: sshProbes),
             accessControlCheck(facts),
         ]
         return checks.compactMap { $0 }.sorted { $0.rank > $1.rank }
@@ -345,12 +369,19 @@ enum SecurityAudit {
         )
     }
 
-    private static func vpnSSHCheck(_ facts: Facts, sshPort: Int) -> SecurityCheck? {
+    private static func sshListensPublicly(_ facts: Facts, sshPort: Int) -> Bool {
+        facts.listenAddresses.compactMap(publicPort).contains(sshPort)
+    }
+
+    private static func vpnSSHCheck(_ facts: Facts, sshPort: Int, probes: [SSHProbe]) -> SecurityCheck? {
         guard let vpn = facts.vpns.first, facts.hasSS else { return nil }
         let id = "ssh.vpn", title = "SSH over \(vpn.capitalized)"
-        let sshIsPublic = facts.listenAddresses.compactMap(publicPort).contains(sshPort)
-        guard sshIsPublic else {
+        guard sshListensPublicly(facts, sshPort: sshPort) else {
             return SecurityCheck(id: id, title: title, status: .pass, detail: "VPN only")
+        }
+        // sshd listens everywhere, but a firewall in front of it may still drop internet traffic.
+        if !probes.contains(.open), probes.contains(.blocked) {
+            return SecurityCheck(id: id, title: title, status: .pass, detail: "firewalled")
         }
         let iface = vpn == "tailscale" ? "tailscale0" : "wg0"
         return SecurityCheck(
@@ -395,6 +426,25 @@ enum SecurityAudit {
               let port = Int(address[address.index(after: colon)...]) else { return nil }
         let host = address[..<colon]
         return ["0.0.0.0", "*", "[::]", "::"].contains(String(host)) ? port : nil
+    }
+
+    /// Internet-routable IPv4 or global-unicast IPv6 literal. Excludes private, CGNAT (Tailscale),
+    /// loopback, link-local, ULA and multicast ranges, and anything that is not an IP address.
+    static func isPublicIP(_ text: String) -> Bool {
+        var v4 = in_addr()
+        if inet_pton(AF_INET, text, &v4) == 1 {
+            let b = withUnsafeBytes(of: &v4) { Array($0) }
+            switch (b[0], b[1]) {
+            case (0, _), (10, _), (127, _), (169, 254), (192, 168), (172, 16...31), (100, 64...127):
+                return false
+            default:
+                return b[0] < 224
+            }
+        }
+        var v6 = in6_addr()
+        guard inet_pton(AF_INET6, text, &v6) == 1 else { return false }
+        let first = withUnsafeBytes(of: &v6) { $0[0] }
+        return first & 0xE0 == 0x20 // 2000::/3
     }
 
     private static func splitFirstWord(_ text: String) -> (String, String) {
