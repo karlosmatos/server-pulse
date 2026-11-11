@@ -690,7 +690,7 @@ struct SecurityPromptTests {
         let prompt = SecurityPrompt.build(server: custom, issues: [issue], passed: [])
 
         #expect(prompt.contains("`ssh -p 2222 deploy@10.0.0.5`"))
-        #expect(prompt.contains("### Firewall — unknown: needs root"))
+        #expect(prompt.contains("### Firewall — unknown (audit ran without root): needs root"))
         #expect(!prompt.contains("- Advice:"))
         #expect(!prompt.contains("Already OK"))
     }
