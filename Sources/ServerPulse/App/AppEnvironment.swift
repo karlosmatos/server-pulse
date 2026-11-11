@@ -54,6 +54,12 @@ final class AppEnvironment {
         return .unknown
     }
 
+    /// Security checks of the selected server, minus the ones the user ignored.
+    var activeSecurityChecks: [SecurityCheck] {
+        let ignored = Set(selectedServer?.ignoredSecurityChecks ?? [])
+        return securityChecks.filter { !ignored.contains($0.id) }
+    }
+
     func issues(for id: UUID) -> [ServerIssue] {
         guard let state = serverStates[id] else { return [] }
         return ServerHealth.issues(for: state)

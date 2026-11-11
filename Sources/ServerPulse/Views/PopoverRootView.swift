@@ -50,14 +50,22 @@ struct PopoverRootView: View {
                 ServerHeaderView()
                 GaugesView()
                 containersAndServices
-                if appEnv.selectedServer?.securityAuditEnabled == true, !appEnv.securityChecks.isEmpty {
-                    SecurityView()
-                }
+                if showsSecurity, hasCriticalSecurityIssue { SecurityView() }
                 if !appEnv.processes.isEmpty { ProcessListView() }
                 if !appEnv.workflows.isEmpty || !appEnv.recentExecutions.isEmpty { N8NView() }
+                // Security changes rarely, so it sits at the bottom unless something is critical.
+                if showsSecurity, !hasCriticalSecurityIssue { SecurityView() }
             }
             .padding(12)
         }
+    }
+
+    private var showsSecurity: Bool {
+        appEnv.selectedServer?.securityAuditEnabled == true && !appEnv.securityChecks.isEmpty
+    }
+
+    private var hasCriticalSecurityIssue: Bool {
+        appEnv.activeSecurityChecks.contains { $0.severity == .critical }
     }
 
     /// Docker and systemd sit side by side when both are present, as on the website.

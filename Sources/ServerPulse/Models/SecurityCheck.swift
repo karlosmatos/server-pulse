@@ -14,8 +14,10 @@ struct SecurityCheck: Identifiable, Equatable {
     let status: Status
     /// Short value shown on the right of the row, e.g. "4 pending".
     let detail: String
-    /// Plain-language guidance.
+    /// One-line guidance.
     var advice: String? = nil
+    /// Longer background, shown only when the row is expanded.
+    var explanation: String? = nil
     /// Shell command that fixes the problem; shown monospaced with a copy button.
     var command: String? = nil
 
@@ -26,5 +28,10 @@ struct SecurityCheck: Identifiable, Equatable {
         case .unknown:            return 1
         case .pass:               return 0
         }
+    }
+
+    var severity: Severity? {
+        if case .fail(let severity) = status { return severity }
+        return nil
     }
 }

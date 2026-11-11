@@ -150,22 +150,23 @@ enum SecurityAudit {
         return checks.compactMap { $0 }.sorted { $0.rank > $1.rank }
     }
 
-    private static let sshdUnreadable = "Cannot read the sshd config as this user"
+    private static let sshdUnreadable = "Can't read sshd config as this user"
 
     private static func rootLoginCheck(_ facts: Facts) -> SecurityCheck {
         let id = "ssh.root", title = "SSH root login"
         guard !facts.sshd.isEmpty else {
             return SecurityCheck(id: id, title: title, status: .unknown, detail: "no access", advice: sshdUnreadable)
         }
-        let advice = "Set PermitRootLogin no in sshd_config and log in as a sudo user"
+        let advice = "Set PermitRootLogin no, use a sudo user"
+        let explanation = "Without root login an attacker also needs a username, and admin actions are traceable through sudo. Connect ServerPulse as that user too; root-only checks then show as unknown."
         // OpenSSH default since 7.0 when the option is absent.
         switch facts.sshd["permitrootlogin"] ?? "prohibit-password" {
         case "no":
             return SecurityCheck(id: id, title: title, status: .pass, detail: "disabled")
         case "yes":
-            return SecurityCheck(id: id, title: title, status: .fail(.critical), detail: "password allowed", advice: advice)
+            return SecurityCheck(id: id, title: title, status: .fail(.critical), detail: "password allowed", advice: advice, explanation: explanation)
         default:
-            return SecurityCheck(id: id, title: title, status: .fail(.warning), detail: "key allowed", advice: advice)
+            return SecurityCheck(id: id, title: title, status: .fail(.warning), detail: "key allowed", advice: advice, explanation: explanation)
         }
     }
 
@@ -185,7 +186,8 @@ enum SecurityAudit {
         return SecurityCheck(
             id: id, title: title, status: .fail(.critical),
             detail: passwordAuth ? "enabled" : "enabled via PAM",
-            advice: "Set PasswordAuthentication no and KbdInteractiveAuthentication no, then reload sshd"
+            advice: "Set PasswordAuthentication no",
+            explanation: "Also set KbdInteractiveAuthentication no, then reload sshd. Passwords can be brute-forced; keys practically can't."
         )
     }
 
@@ -200,12 +202,12 @@ enum SecurityAudit {
         guard facts.uid == 0 else {
             return SecurityCheck(
                 id: id, title: title, status: .unknown, detail: "needs root",
-                advice: "Connect as root to inspect iptables/nftables"
+                advice: "Connect as root to inspect iptables"
             )
         }
         return SecurityCheck(
             id: id, title: title, status: .fail(.warning), detail: "none",
-            advice: "Ignore this if your hosting provider filters traffic",
+            advice: "Skip if your provider filters traffic",
             command: "ufw default deny incoming && ufw allow OpenSSH && ufw enable"
         )
     }
@@ -270,9 +272,10 @@ enum SecurityAudit {
                 id: id, title: title,
                 status: .fail(automatic ? .warning : .critical),
                 detail: "\(updates.security) pending",
-                advice: automatic
-                    ? "unattended-upgrades should install these on its next daily run"
-                    : "Automatic updates are off, so these stay unpatched until you install them",
+                advice: automatic ? "Auto-updates will install these" : "Auto-updates are off",
+                explanation: automatic
+                    ? "unattended-upgrades should pick these up on its next daily run."
+                    : "These stay unpatched until someone installs them.",
                 command: "apt update && apt upgrade"
             )
         }
@@ -287,7 +290,7 @@ enum SecurityAudit {
         }
         return SecurityCheck(
             id: id, title: title, status: .fail(.warning), detail: "required",
-            advice: "Reboot in a quiet window to apply installed updates"
+            advice: "Reboot to apply installed updates"
         )
     }
 
@@ -300,7 +303,8 @@ enum SecurityAudit {
         }
         return SecurityCheck(
             id: id, title: title, status: .fail(.critical), detail: extra.joined(separator: ", "),
-            advice: "These accounts have UID 0. Remove them or give them a regular UID"
+            advice: "Remove them or give them a regular UID",
+            explanation: "Any account with UID 0 is a full root account."
         )
     }
 
@@ -320,7 +324,8 @@ enum SecurityAudit {
         let more = exposed.count > 4 ? " +\(exposed.count - 4)" : ""
         return SecurityCheck(
             id: id, title: title, status: .fail(.warning), detail: "\(list)\(more)",
-            advice: "Listening on all interfaces. Bind to 127.0.0.1 or publish Docker ports as 127.0.0.1:port:port. Docker-published ports bypass ufw and INPUT rules"
+            advice: "Bind to 127.0.0.1 — Docker ports bypass ufw",
+            explanation: "These listen on all interfaces. Publish Docker ports as 127.0.0.1:port:port and put a reverse proxy in front; Docker-published ports skip ufw and INPUT rules."
         )
     }
 
@@ -328,7 +333,8 @@ enum SecurityAudit {
         guard facts.listenAddresses.compactMap(publicPort).contains(dockerAPIPort) else { return nil }
         return SecurityCheck(
             id: "docker.api", title: "Docker API", status: .fail(.critical), detail: "\(dockerAPIPort) open",
-            advice: "The unauthenticated Docker API gives anyone root on this host. Remove the tcp:// host from the dockerd config"
+            advice: "Remove the tcp:// host from dockerd",
+            explanation: "The unauthenticated Docker API gives anyone root on this host."
         )
     }
 
@@ -342,7 +348,8 @@ enum SecurityAudit {
         let iface = vpn == "tailscale" ? "tailscale0" : "wg0"
         return SecurityCheck(
             id: id, title: title, status: .fail(.warning), detail: "SSH public",
-            advice: "\(vpn.capitalized) is running, but SSH also accepts connections from the internet. Allow SSH only on \(iface) and point ServerPulse at the VPN address. Ignore this if your firewall already limits SSH",
+            advice: "Allow SSH only on \(iface)",
+            explanation: "\(vpn.capitalized) is running, but SSH also accepts connections from the internet. Point ServerPulse at the VPN address first. Ignore this if your firewall already limits SSH.",
             command: facts.firewalls.contains("ufw")
                 ? "ufw allow in on \(iface) to any port \(sshPort) proto tcp && ufw delete allow OpenSSH"
                 : nil
@@ -360,14 +367,16 @@ enum SecurityAudit {
         if facts.seLinux == "permissive" {
             return SecurityCheck(
                 id: id, title: title, status: .fail(.warning), detail: "permissive",
-                advice: "SELinux only logs violations. Set SELINUX=enforcing in /etc/selinux/config",
+                advice: "Set SELINUX=enforcing",
+                explanation: "Permissive mode only logs violations. Make it permanent in /etc/selinux/config.",
                 command: "setenforce 1"
             )
         }
         guard facts.appArmor != nil || facts.seLinux != nil else { return nil }
         return SecurityCheck(
             id: id, title: title, status: .fail(.warning), detail: "disabled",
-            advice: "Mandatory access control limits what a compromised service can do. Re-enable AppArmor or SELinux"
+            advice: "Re-enable AppArmor or SELinux",
+            explanation: "Mandatory access control limits what a compromised service can do."
         )
     }
 
