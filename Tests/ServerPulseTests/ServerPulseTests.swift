@@ -604,9 +604,23 @@ struct SecurityAuditTests {
     }
 
     @Test func classifiesProbeErrors() {
-        #expect(PortProbe.classify(.posix(.ECONNREFUSED)) == .blocked)
-        #expect(PortProbe.classify(.posix(.ETIMEDOUT)) == .blocked)
-        #expect(PortProbe.classify(.posix(.ENETUNREACH)) == .inconclusive)
+        #expect(PortProbe.classify(.posix(.ECONNREFUSED)).probe == .blocked)
+        #expect(PortProbe.classify(.posix(.ETIMEDOUT)).probe == .blocked)
+        #expect(PortProbe.classify(.posix(.ENETUNREACH)).probe == .inconclusive)
+    }
+
+    @Test func probeNeedsSSHBannerAndHonestNetwork() {
+        // A connect without an SSH greeting is likely a local VPN/proxy, not the server.
+        #expect(PortProbe.Outcome.sshBanner.probe == .open)
+        #expect(PortProbe.Outcome.silent.probe == .inconclusive)
+
+        let outcomes: [PortProbe.Outcome] = [.timedOut, .refused, .sshBanner]
+        #expect(PortProbe.verdicts(outcomes, canary: .timedOut) == [.blocked, .blocked, .open])
+        #expect(PortProbe.verdicts(outcomes, canary: .unreachable) == [.blocked, .blocked, .open])
+        // The never-routed canary answered, so this Mac's network fakes connects.
+        for canary in [PortProbe.Outcome.silent, .refused, .sshBanner] {
+            #expect(PortProbe.verdicts(outcomes, canary: canary) == [.inconclusive, .inconclusive, .inconclusive])
+        }
     }
 
     @Test func probeOfClosedLocalPortIsBlocked() async {
