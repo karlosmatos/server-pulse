@@ -326,6 +326,27 @@ struct AppEnvironmentTests {
         #expect(await probe.maxActiveCount() <= 3)
         #expect(await probe.completedCount() == 6)
     }
+
+    @Test @MainActor func ignoringSecurityCheckPersistsPerServer() async throws {
+        let deps = makeTestSettingsDeps()
+        let settings = AppSettings(userDefaults: deps.defaults, keychain: deps.keychain)
+        let env = AppEnvironment(
+            settings: settings,
+            pollingServiceFactory: { PollingService(config: $0, pollOverride: { PollResult() }) },
+            notificationPermissionRequester: {},
+            autoStartPolling: false
+        )
+        let server = makeServer(id: UUID(), key: "k", interval: 3_600)
+        env.addServer(server)
+
+        env.setSecurityCheck("ssh.root", ignored: true)
+        env.setSecurityCheck("ports", ignored: true)
+        env.setSecurityCheck("ports", ignored: false)
+
+        #expect(env.selectedServer?.ignoredSecurityChecks == ["ssh.root"])
+        let reloaded = AppSettings(userDefaults: deps.defaults, keychain: deps.keychain).loadServers()
+        #expect(reloaded.first?.ignoredSecurityChecks == ["ssh.root"])
+    }
 }
 
 // MARK: - Helpers
@@ -455,10 +476,11 @@ struct SecurityAuditTests {
         #expect(check("ips", in: checks)?.status == .pass)
         #expect(check("autoupdates", in: checks)?.status == .pass)
         #expect(check("updates", in: checks)?.status == .fail(.critical))
-        #expect(check("updates", in: checks)?.detail == "4 security updates pending")
+        #expect(check("updates", in: checks)?.detail == "4 pending")
+        #expect(check("updates", in: checks)?.command == "apt update && apt upgrade")
         #expect(check("reboot", in: checks)?.status == .pass)
         #expect(check("uid0", in: checks)?.status == .pass)
-        #expect(check("ports", in: checks)?.detail == "Listening on all interfaces: 5678")
+        #expect(check("ports", in: checks)?.detail == "5678")
     }
 
     @Test func sortsFailuresBySeverityFirst() {
@@ -507,12 +529,12 @@ struct SecurityAuditTests {
 
     @Test func flagsExtraUidZeroAccounts() {
         let checks = SecurityAudit.evaluate(output: "uid0 root\nuid0 toor", sshPort: 22)
-        #expect(check("uid0", in: checks)?.detail == "UID 0 besides root: toor")
+        #expect(check("uid0", in: checks)?.detail == "toor")
     }
 
     @Test func detectsDisabledUnattendedUpgrades() {
         let checks = SecurityAudit.evaluate(output: "pkg apt\nuu installed\nuu periodic 0", sshPort: 22)
-        #expect(check("autoupdates", in: checks)?.detail == "unattended-upgrades is disabled")
+        #expect(check("autoupdates", in: checks)?.detail == "disabled")
     }
 
     @Test func ignoresCustomSshPortAndLoopback() {

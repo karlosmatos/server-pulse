@@ -158,6 +158,21 @@ final class AppEnvironment {
         }
     }
 
+    /// Ignored checks stay visible but no longer count toward the score. Does not restart polling.
+    func setSecurityCheck(_ checkID: String, ignored: Bool) {
+        guard let id = selectedServerID,
+              let index = servers.firstIndex(where: { $0.id == id }) else { return }
+        var list = servers
+        var ignoredIDs = Set(list[index].ignoredSecurityChecks)
+        if ignored {
+            ignoredIDs.insert(checkID)
+        } else {
+            ignoredIDs.remove(checkID)
+        }
+        list[index].ignoredSecurityChecks = ignoredIDs.sorted()
+        persistServers(list)
+    }
+
     func refreshNow() {
         guard let id = selectedServerID,
               let serviceID = pollingServices[id]?.instanceID else { return }

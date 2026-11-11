@@ -18,10 +18,12 @@ enum SecurityAudit {
     else
       cat /etc/ssh/sshd_config.d/*.conf /etc/ssh/sshd_config 2>/dev/null | sed -n '/^[[:space:]]*[Mm]atch[[:space:]]/q;s/^[[:space:]]*//;/^#/d;/^$/d;s/^/sshd /p'
     fi
-    grep -qs '^ENABLED=yes' /etc/ufw/ufw.conf && echo "firewall ufw"
+    # ufw.conf survives `apt remove ufw`, so also require the binary.
+    { [ -x /usr/sbin/ufw ] || command -v ufw >/dev/null 2>&1; } && grep -qs '^ENABLED=yes' /etc/ufw/ufw.conf && echo "firewall ufw"
     systemctl is-active --quiet firewalld 2>/dev/null && echo "firewall firewalld"
+    # Only default-deny counts: a rule dropping a few ports is not a firewall.
     if [ "$(id -u)" = 0 ]; then
-      echo "fwrules $({ iptables -S INPUT 2>/dev/null; nft list ruleset 2>/dev/null; } | grep -cE '^-P INPUT (DROP|REJECT)|^-A INPUT .*-j (DROP|REJECT)|hook input .*policy drop')"
+      echo "fwrules $({ iptables -S INPUT 2>/dev/null; nft list ruleset 2>/dev/null; } | grep -cE '^-P INPUT (DROP|REJECT)|^-A INPUT( -i [^ ]+)? -j (DROP|REJECT)( --reject-with [^ ]+)?$|hook input .*policy drop')"
     fi
     for s in fail2ban crowdsec; do systemctl is-active --quiet "$s" 2>/dev/null && echo "ips $s"; done
     if command -v apt-get >/dev/null 2>&1; then
@@ -129,34 +131,29 @@ enum SecurityAudit {
         return checks.compactMap { $0 }.sorted { $0.rank > $1.rank }
     }
 
+    private static let sshdUnreadable = "Cannot read the sshd config as this user"
+
     private static func rootLoginCheck(_ facts: Facts) -> SecurityCheck {
-        let title = "SSH root login"
+        let id = "ssh.root", title = "SSH root login"
         guard !facts.sshd.isEmpty else {
-            return SecurityCheck(id: "ssh.root", title: title, status: .unknown, detail: "Cannot read sshd config")
+            return SecurityCheck(id: id, title: title, status: .unknown, detail: "no access", advice: sshdUnreadable)
         }
+        let advice = "Set PermitRootLogin no in sshd_config and log in as a sudo user"
         // OpenSSH default since 7.0 when the option is absent.
         switch facts.sshd["permitrootlogin"] ?? "prohibit-password" {
         case "no":
-            return SecurityCheck(id: "ssh.root", title: title, status: .pass, detail: "Disabled")
+            return SecurityCheck(id: id, title: title, status: .pass, detail: "disabled")
         case "yes":
-            return SecurityCheck(
-                id: "ssh.root", title: title, status: .fail(.critical),
-                detail: "Root can log in with a password",
-                fix: "Set PermitRootLogin no in sshd_config and use a sudo user"
-            )
+            return SecurityCheck(id: id, title: title, status: .fail(.critical), detail: "password allowed", advice: advice)
         default:
-            return SecurityCheck(
-                id: "ssh.root", title: title, status: .fail(.warning),
-                detail: "Root can log in with a key",
-                fix: "Set PermitRootLogin no in sshd_config and use a sudo user"
-            )
+            return SecurityCheck(id: id, title: title, status: .fail(.warning), detail: "key allowed", advice: advice)
         }
     }
 
     private static func passwordAuthCheck(_ facts: Facts) -> SecurityCheck {
-        let title = "SSH password login"
+        let id = "ssh.password", title = "SSH password login"
         guard !facts.sshd.isEmpty else {
-            return SecurityCheck(id: "ssh.password", title: title, status: .unknown, detail: "Cannot read sshd config")
+            return SecurityCheck(id: id, title: title, status: .unknown, detail: "no access", advice: sshdUnreadable)
         }
         let passwordAuth = (facts.sshd["passwordauthentication"] ?? "yes") == "yes"
         // Keyboard-interactive through PAM also accepts passwords. Only flag it when explicit,
@@ -164,66 +161,68 @@ enum SecurityAudit {
         let kbdInteractive = (facts.sshd["kbdinteractiveauthentication"] ?? facts.sshd["challengeresponseauthentication"]) == "yes"
             && facts.sshd["usepam"] == "yes"
         guard passwordAuth || kbdInteractive else {
-            return SecurityCheck(id: "ssh.password", title: title, status: .pass, detail: "Keys only")
+            return SecurityCheck(id: id, title: title, status: .pass, detail: "keys only")
         }
         return SecurityCheck(
-            id: "ssh.password", title: title, status: .fail(.critical),
-            detail: passwordAuth ? "Password authentication enabled" : "Keyboard-interactive (PAM) login enabled",
-            fix: "Set PasswordAuthentication no and KbdInteractiveAuthentication no, then reload sshd"
+            id: id, title: title, status: .fail(.critical),
+            detail: passwordAuth ? "enabled" : "enabled via PAM",
+            advice: "Set PasswordAuthentication no and KbdInteractiveAuthentication no, then reload sshd"
         )
     }
 
     private static func firewallCheck(_ facts: Facts) -> SecurityCheck {
-        let title = "Firewall"
+        let id = "firewall", title = "Firewall"
         if let name = facts.firewalls.first {
-            return SecurityCheck(id: "firewall", title: title, status: .pass, detail: "\(name) active")
+            return SecurityCheck(id: id, title: title, status: .pass, detail: name)
         }
         if let rules = facts.firewallRuleCount, rules > 0 {
-            return SecurityCheck(id: "firewall", title: title, status: .pass, detail: "iptables/nftables filtering")
+            return SecurityCheck(id: id, title: title, status: .pass, detail: "iptables")
         }
         guard facts.uid == 0 else {
-            return SecurityCheck(id: "firewall", title: title, status: .unknown, detail: "Connect as root to inspect iptables/nftables")
+            return SecurityCheck(
+                id: id, title: title, status: .unknown, detail: "needs root",
+                advice: "Connect as root to inspect iptables/nftables"
+            )
         }
         return SecurityCheck(
-            id: "firewall", title: title, status: .fail(.warning),
-            detail: "No host firewall (fine if your provider filters traffic)",
-            fix: "ufw default deny incoming && ufw allow OpenSSH && ufw enable"
+            id: id, title: title, status: .fail(.warning), detail: "none",
+            advice: "Ignore this if your hosting provider filters traffic",
+            command: "ufw default deny incoming && ufw allow OpenSSH && ufw enable"
         )
     }
 
     private static func intrusionPreventionCheck(_ facts: Facts) -> SecurityCheck {
-        let title = "Brute-force protection"
+        let id = "ips", title = "Brute-force protection"
         if let name = facts.intrusionPrevention.first {
-            return SecurityCheck(id: "ips", title: title, status: .pass, detail: "\(name) running")
+            return SecurityCheck(id: id, title: title, status: .pass, detail: name)
         }
         return SecurityCheck(
-            id: "ips", title: title, status: .fail(.warning),
-            detail: "No fail2ban or CrowdSec running",
-            fix: "Install fail2ban (apt install fail2ban) or CrowdSec"
+            id: id, title: title, status: .fail(.warning), detail: "none",
+            advice: "Install fail2ban or CrowdSec",
+            command: facts.packageManager.map { "\($0) install fail2ban" }
         )
     }
 
     private static func automaticUpdatesCheck(_ facts: Facts) -> SecurityCheck? {
-        let title = "Automatic security updates"
+        let id = "autoupdates", title = "Automatic updates"
         switch facts.packageManager {
         case "apt":
             let periodic = facts.unattendedPeriodic ?? "0"
             if facts.unattendedInstalled, periodic != "0", !periodic.isEmpty {
-                return SecurityCheck(id: "autoupdates", title: title, status: .pass, detail: "unattended-upgrades enabled")
+                return SecurityCheck(id: id, title: title, status: .pass, detail: "enabled")
             }
             return SecurityCheck(
-                id: "autoupdates", title: title, status: .fail(.warning),
-                detail: facts.unattendedInstalled ? "unattended-upgrades is disabled" : "unattended-upgrades not installed",
-                fix: "apt install unattended-upgrades && dpkg-reconfigure -plow unattended-upgrades"
+                id: id, title: title, status: .fail(.warning),
+                detail: facts.unattendedInstalled ? "disabled" : "not installed",
+                command: "apt install unattended-upgrades && dpkg-reconfigure -plow unattended-upgrades"
             )
         case "dnf":
-            if let timer = facts.dnfAutomaticTimers.first {
-                return SecurityCheck(id: "autoupdates", title: title, status: .pass, detail: "\(timer) enabled")
+            if !facts.dnfAutomaticTimers.isEmpty {
+                return SecurityCheck(id: id, title: title, status: .pass, detail: "enabled")
             }
             return SecurityCheck(
-                id: "autoupdates", title: title, status: .fail(.warning),
-                detail: "dnf-automatic not enabled",
-                fix: "dnf install dnf-automatic && systemctl enable --now dnf-automatic-install.timer"
+                id: id, title: title, status: .fail(.warning), detail: "disabled",
+                command: "dnf install dnf-automatic && systemctl enable --now dnf-automatic-install.timer"
             )
         default:
             return nil
@@ -232,59 +231,54 @@ enum SecurityAudit {
 
     private static func pendingUpdatesCheck(_ facts: Facts) -> SecurityCheck? {
         guard let updates = facts.pendingUpdates else { return nil }
-        let title = "Security updates"
-        if updates.security > 0 {
+        let id = "updates", title = "Security updates"
+        guard updates.security == 0 else {
             return SecurityCheck(
-                id: "updates", title: title, status: .fail(.critical),
-                detail: "\(updates.security) security update\(updates.security == 1 ? "" : "s") pending",
-                fix: "apt update && apt upgrade"
+                id: id, title: title, status: .fail(.critical), detail: "\(updates.security) pending",
+                command: "apt update && apt upgrade"
             )
         }
-        let other = updates.total > 0 ? " (\(updates.total) other pending)" : ""
-        return SecurityCheck(id: "updates", title: title, status: .pass, detail: "Up to date\(other)")
+        return SecurityCheck(id: id, title: title, status: .pass, detail: "up to date")
     }
 
     private static func rebootCheck(_ facts: Facts) -> SecurityCheck? {
         guard let required = facts.rebootRequired else { return nil }
-        let title = "Reboot"
+        let id = "reboot", title = "Reboot"
         guard required else {
-            return SecurityCheck(id: "reboot", title: title, status: .pass, detail: "Not required")
+            return SecurityCheck(id: id, title: title, status: .pass, detail: "not needed")
         }
         return SecurityCheck(
-            id: "reboot", title: title, status: .fail(.warning),
-            detail: "Reboot required to apply updates",
-            fix: "Reboot the server in a quiet window"
+            id: id, title: title, status: .fail(.warning), detail: "required",
+            advice: "Reboot in a quiet window to apply installed updates"
         )
     }
 
     private static func uidZeroCheck(_ facts: Facts) -> SecurityCheck? {
         guard !facts.uidZeroAccounts.isEmpty else { return nil }
-        let title = "Superuser accounts"
+        let id = "uid0", title = "Superuser accounts"
         let extra = facts.uidZeroAccounts.filter { $0 != "root" }
         guard !extra.isEmpty else {
-            return SecurityCheck(id: "uid0", title: title, status: .pass, detail: "Only root has UID 0")
+            return SecurityCheck(id: id, title: title, status: .pass, detail: "root only")
         }
         return SecurityCheck(
-            id: "uid0", title: title, status: .fail(.critical),
-            detail: "UID 0 besides root: \(extra.joined(separator: ", "))",
-            fix: "Remove these accounts or give them a regular UID"
+            id: id, title: title, status: .fail(.critical), detail: extra.joined(separator: ", "),
+            advice: "These accounts have UID 0. Remove them or give them a regular UID"
         )
     }
 
     private static func publicPortsCheck(_ facts: Facts, sshPort: Int) -> SecurityCheck? {
         guard facts.hasSS else { return nil }
-        let title = "Public ports"
+        let id = "ports", title = "Public ports"
         let allowed = expectedPublicPorts.union([sshPort])
         let exposed = Set(facts.listenAddresses.compactMap(publicPort)).subtracting(allowed).sorted()
         guard !exposed.isEmpty else {
-            return SecurityCheck(id: "ports", title: title, status: .pass, detail: "Only SSH/HTTP(S) listen publicly")
+            return SecurityCheck(id: id, title: title, status: .pass, detail: "SSH/HTTP only")
         }
-        let list = exposed.prefix(6).map { String($0) }.joined(separator: ", ")
-        let more = exposed.count > 6 ? " +\(exposed.count - 6)" : ""
+        let list = exposed.prefix(4).map { String($0) }.joined(separator: ", ")
+        let more = exposed.count > 4 ? " +\(exposed.count - 4)" : ""
         return SecurityCheck(
-            id: "ports", title: title, status: .fail(.warning),
-            detail: "Listening on all interfaces: \(list)\(more)",
-            fix: "Bind to 127.0.0.1 or block in the firewall (Docker-published ports bypass ufw)"
+            id: id, title: title, status: .fail(.warning), detail: "\(list)\(more)",
+            advice: "Listening on all interfaces. Bind to 127.0.0.1 or publish Docker ports as 127.0.0.1:port:port. Docker-published ports bypass ufw and INPUT rules"
         )
     }
 

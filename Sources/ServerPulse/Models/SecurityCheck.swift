@@ -12,8 +12,12 @@ struct SecurityCheck: Identifiable, Equatable {
     let id: String
     let title: String
     let status: Status
+    /// Short value shown on the right of the row, e.g. "4 pending".
     let detail: String
-    var fix: String? = nil
+    /// Plain-language guidance.
+    var advice: String? = nil
+    /// Shell command that fixes the problem; shown monospaced with a copy button.
+    var command: String? = nil
 
     /// Sort key: most severe failures first, then unknowns, then passes.
     var rank: Int {
