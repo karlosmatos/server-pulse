@@ -88,13 +88,15 @@ enum SecurityAudit {
                 if !name.isEmpty, !firstValue.isEmpty, facts.sshd[name] == nil {
                     facts.sshd[name] = firstValue
                 }
-            case "firewall":
+            // Server output is untrusted (it ends up in UI and AI prompts), so string
+            // facts are limited to known values.
+            case "firewall" where ["ufw", "firewalld"].contains(value):
                 facts.firewalls.append(value)
             case "fwrules":
                 facts.firewallRuleCount = Int(value)
-            case "ips":
+            case "ips" where ["fail2ban", "crowdsec"].contains(value):
                 facts.intrusionPrevention.append(value)
-            case "pkg":
+            case "pkg" where ["apt", "dnf"].contains(value):
                 facts.packageManager = value
             case "uu":
                 let (kind, setting) = splitFirstWord(value)
@@ -107,17 +109,17 @@ enum SecurityAudit {
                 facts.rebootRequired = value == "yes"
             case "dnfauto":
                 facts.dnfAutomaticTimers.append(value)
-            case "uid0":
+            case "uid0" where isAccountName(value):
                 facts.uidZeroAccounts.append(value)
             case "ss":
                 facts.hasSS = true
             case "listen":
                 facts.listenAddresses.append(value)
-            case "vpn":
+            case "vpn" where ["tailscale", "wireguard"].contains(value):
                 facts.vpns.append(value)
-            case "apparmor":
+            case "apparmor" where ["Y", "N"].contains(value):
                 facts.appArmor = value
-            case "selinux":
+            case "selinux" where ["enforcing", "permissive", "disabled"].contains(value.lowercased()):
                 facts.seLinux = value.lowercased()
             default:
                 continue
@@ -127,6 +129,11 @@ enum SecurityAudit {
     }
 
     // MARK: - Checks
+
+    /// POSIX-ish user name; anything else in /etc/passwd is dropped rather than displayed.
+    static func isAccountName(_ name: String) -> Bool {
+        name.range(of: #"^[A-Za-z_][A-Za-z0-9_.-]{0,31}$"#, options: .regularExpression) != nil
+    }
 
     static func evaluate(output: String, sshPort: Int) -> [SecurityCheck] {
         evaluate(facts: parseFacts(from: output), sshPort: sshPort)
