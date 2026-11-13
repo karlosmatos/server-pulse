@@ -8,23 +8,29 @@ struct MenuBarLabel: View {
     var body: some View {
         if attentionCount > 0 {
             HStack(spacing: 2) {
-                Image(nsImage: Self.coloredSymbol(severity.symbol, color: NSColor(severity.color)))
+                Image(nsImage: Self.coloredSymbol(severity.symbol, colors: [glyphColor, NSColor(severity.color)]))
                 Text("\(attentionCount)").monospacedDigit()
             }
             .accessibilityLabel("ServerPulse, \(attentionCount) servers need attention")
         } else {
             Image(nsImage: Self.coloredSymbol(
                 status == .unknown ? "circle.dashed" : "circle.fill",
-                color: NSColor(status.color)
+                colors: [NSColor(status.color)]
             ))
             .accessibilityLabel("ServerPulse, \(status.label)")
         }
     }
 
+    /// The "!" / "×" inside the severity symbol; it needs its own color or it blends into the shape.
+    private var glyphColor: NSColor {
+        severity == .warning ? .black : .white
+    }
+
     /// Menu bar labels render as templates (monochrome); a non-template image keeps the status color.
-    private static func coloredSymbol(_ name: String, color: NSColor) -> NSImage {
+    /// Palette colors apply per symbol layer, foreground layer first.
+    private static func coloredSymbol(_ name: String, colors: [NSColor]) -> NSImage {
         let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
-            .applying(.init(paletteColors: [color]))
+            .applying(.init(paletteColors: colors))
         let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
             .withSymbolConfiguration(config) ?? NSImage()
         image.isTemplate = false

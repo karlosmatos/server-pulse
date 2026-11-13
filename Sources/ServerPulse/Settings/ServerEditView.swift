@@ -17,6 +17,7 @@ struct ServerEditView: View {
     @State private var processFilter = ""
     @State private var dockerEnabled = false
     @State private var systemdServices = ""
+    @State private var securityAuditEnabled = true
 
     var body: some View {
         ScrollView {
@@ -53,6 +54,15 @@ struct ServerEditView: View {
                             .font(.caption2).foregroundStyle(.tertiary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.leading, 64)
+                    }
+                }
+
+                SectionCard(icon: "lock.shield", title: "Security Audit", tint: .red) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Toggle("Show security checks", isOn: $securityAuditEnabled)
+                            .font(.caption)
+                        Text("Read-only hardening checks every 6 hours. Never uses sudo.")
+                            .font(.caption2).foregroundStyle(.tertiary)
                     }
                 }
 
@@ -102,6 +112,7 @@ struct ServerEditView: View {
             processFilter = config.processFilter
             dockerEnabled = config.dockerEnabled
             systemdServices = config.systemdServices
+            securityAuditEnabled = config.securityAuditEnabled
         }
     }
 
@@ -143,6 +154,7 @@ struct ServerEditView: View {
         updated.processFilter = trimmedFilter
         updated.dockerEnabled = dockerEnabled
         updated.systemdServices = trimmedServices
+        updated.securityAuditEnabled = securityAuditEnabled
         onDone(updated)
     }
 }

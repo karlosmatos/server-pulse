@@ -11,6 +11,7 @@ A macOS menu bar app that monitors **multiple Linux servers** — showing CPU/RA
 - **Docker containers**: status and resource usage for all running containers
 - **Systemd services**: active/inactive/failed state for named services
 - **n8n workflows**: active/inactive status and recent execution history
+- **Security audit**: read-only hardening checks (SSH root/password login, firewall, fail2ban/CrowdSec, automatic updates, pending security updates, reboot required, extra UID 0 accounts, publicly exposed ports, exposed Docker API, public SSH despite Tailscale/WireGuard, AppArmor/SELinux) with advice and a copyable fix command for each failure. "Ask AI" copies a ready-made prompt for Claude Code, Codex or another agent to plan the fixes. Hover a check to ignore it per server; the whole card can be turned off per server in Settings. Runs every 6 hours and on manual refresh; never uses sudo, so some checks show as unknown unless you connect as root
 - **One-click SSH**: open a terminal session to the selected server straight from the menu bar
 - **Notifications**: per-server alerts when a server goes offline or a monitored process stops
 

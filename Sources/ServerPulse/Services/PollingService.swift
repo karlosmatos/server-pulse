@@ -11,6 +11,8 @@ struct PollResult {
     var recentExecutions: [N8NExecution] = []
     var errorMessage: String?
     var didRefreshHeavyData: Bool = false
+    /// nil when the audit was not requested or could not run.
+    var securityChecks: [SecurityCheck]?
 }
 
 struct PollingService {
@@ -31,7 +33,7 @@ struct PollingService {
         self.pollOverride = pollOverride
     }
 
-    func poll(includeHeavyData: Bool = true) async -> PollResult {
+    func poll(includeHeavyData: Bool = true, includeSecurityAudit: Bool = false) async -> PollResult {
         if let pollOverride {
             return await pollOverride()
         }
@@ -100,6 +102,16 @@ struct PollingService {
         result.workflows        = wf   ?? []
         result.recentExecutions = exec ?? []
         result.didRefreshHeavyData = includeHeavyData
+
+        // Runs after the snapshot so it reuses the SSH ControlMaster connection.
+        if includeSecurityAudit, config.securityAuditEnabled, snapshot != nil,
+           let auditOutput = try? await ssh.run(SecurityAudit.command) {
+            let facts = SecurityAudit.parseFacts(from: auditOutput)
+            let sshProbes = SecurityAudit.needsSSHProbe(facts, sshPort: config.sshPort)
+                ? await PortProbe.probeAll(hosts: facts.publicAddresses, port: config.sshPort)
+                : []
+            result.securityChecks = SecurityAudit.evaluate(facts: facts, sshPort: config.sshPort, sshProbes: sshProbes)
+        }
 
         let totalDuration = ProcessInfo.processInfo.systemUptime - pollStart
         logDiagnostics(
