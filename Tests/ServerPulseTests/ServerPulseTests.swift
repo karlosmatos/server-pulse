@@ -86,7 +86,7 @@ struct TerminalLauncherTests {
 struct SSHConfigValidatorTests {
 
     @Test func rejectsOptionLikeHost() throws {
-        var config = makeServer(id: UUID(), key: "")
+        var config = makeServer(id: UUID())
         config.sshHost = "-oProxyCommand=touch/tmp/pwned"
         #expect(throws: SSHConfigError.invalidHost) {
             try SSHConfigValidator.destination(for: config)
@@ -94,7 +94,7 @@ struct SSHConfigValidatorTests {
     }
 
     @Test func rejectsOptionLikeUser() throws {
-        var config = makeServer(id: UUID(), key: "")
+        var config = makeServer(id: UUID())
         config.sshHost = "127.0.0.1"
         config.sshUser = "-lroot"
         #expect(throws: SSHConfigError.invalidUser) {
@@ -114,70 +114,11 @@ struct SSHConfigValidatorTests {
     }
 }
 
-@Suite("N8NClient")
-struct N8NClientTests {
-
-    @Test func rejectsInvalidScheme() async {
-        let config = ServerConfig(
-            name: "Test",
-            sshHost: "127.0.0.1",
-            sshUser: "root",
-            n8nBaseURL: "example.com",
-            n8nAPIKey: "abc"
-        )
-        let client = N8NClient(config: config)
-        await #expect(throws: N8NError.invalidScheme) {
-            _ = try await client.fetchWorkflows()
-        }
-    }
-
-    @Test func rejectsPlainHTTP() async {
-        let config = ServerConfig(
-            name: "Test",
-            sshHost: "127.0.0.1",
-            sshUser: "root",
-            n8nBaseURL: "http://n8n.local",
-            n8nAPIKey: "abc"
-        )
-        let client = N8NClient(config: config)
-        await #expect(throws: N8NError.invalidScheme) {
-            _ = try await client.fetchWorkflows()
-        }
-    }
-}
-
 @Suite("AppSettings")
 struct AppSettingsTests {
 
-    @Test func saveServersDeletesRemovedServerKeychainEntry() {
-        let deps = makeTestSettingsDeps()
-        let settings = AppSettings(userDefaults: deps.defaults, keychain: deps.keychain)
-
-        let serverA = makeServer(id: UUID(), key: "a-key")
-        let serverB = makeServer(id: UUID(), key: "b-key")
-
-        #expect(settings.saveServers([serverA, serverB]))
-        #expect(deps.keychain.values[serverA.id.uuidString] == "a-key")
-        #expect(deps.keychain.values[serverB.id.uuidString] == "b-key")
-
-        #expect(settings.saveServers([serverA]))
-        #expect(deps.keychain.values[serverA.id.uuidString] == "a-key")
-        #expect(deps.keychain.values[serverB.id.uuidString] == nil)
-        #expect(deps.keychain.deletedAccounts.contains(serverB.id.uuidString))
-    }
-
-    @Test func saveServersFailsWhenKeychainWriteFails() {
-        let deps = makeTestSettingsDeps()
-        let server = makeServer(id: UUID(), key: "secret")
-        deps.keychain.failSetAccounts.insert(server.id.uuidString)
-
-        let settings = AppSettings(userDefaults: deps.defaults, keychain: deps.keychain)
-        #expect(!settings.saveServers([server]))
-        #expect(deps.defaults.data(forKey: "servers.list") == nil)
-    }
-
-    @Test func loadServersMigratesLegacyJSONKeyToKeychain() throws {
-        let deps = makeTestSettingsDeps()
+    @Test func loadsConfigsSavedWithN8NFields() throws {
+        let defaults = makeTestDefaults()
         let serverID = UUID()
         let legacyJSON = """
         [{
@@ -196,21 +137,19 @@ struct AppSettingsTests {
           "systemdServices": ""
         }]
         """
-
-        deps.defaults.set(Data(legacyJSON.utf8), forKey: "servers.list")
-        let settings = AppSettings(userDefaults: deps.defaults, keychain: deps.keychain)
+        defaults.set(Data(legacyJSON.utf8), forKey: "servers.list")
+        let settings = AppSettings(userDefaults: defaults)
 
         let servers = settings.loadServers()
-        #expect(servers.count == 1)
-        #expect(servers[0].n8nAPIKey == "legacy-secret")
+        #expect(servers.map(\.id) == [serverID])
         // Configs saved before the security audit existed get it enabled with nothing ignored.
         #expect(servers[0].securityAuditEnabled)
         #expect(servers[0].ignoredSecurityChecks.isEmpty)
-        #expect(deps.keychain.values[serverID.uuidString] == "legacy-secret")
 
-        let resaved = try #require(deps.defaults.data(forKey: "servers.list"))
+        #expect(settings.saveServers(servers))
+        let resaved = try #require(defaults.data(forKey: "servers.list"))
         let resavedText = try #require(String(data: resaved, encoding: .utf8))
-        #expect(!resavedText.contains("n8nAPIKey"))
+        #expect(!resavedText.contains("n8n"))
     }
 }
 
@@ -261,11 +200,12 @@ struct ServerHealthTests {
 struct AppEnvironmentTests {
 
     @Test @MainActor func stalePollingResultDoesNotOverwriteNewServiceState() async throws {
-        let deps = makeTestSettingsDeps()
-        let settings = AppSettings(userDefaults: deps.defaults, keychain: deps.keychain)
+        let defaults = makeTestDefaults()
+        let settings = AppSettings(userDefaults: defaults)
         let serverID = UUID()
-        let original = makeServer(id: serverID, key: "v1", interval: 3_600)
-        let updated = makeServer(id: serverID, key: "v2", interval: 3_600)
+        let original = makeServer(id: serverID, interval: 3_600)
+        var updated = makeServer(id: serverID, interval: 3_600)
+        updated.name = "Renamed"
 
         var callIndex = 0
         let env = AppEnvironment(
@@ -300,8 +240,8 @@ struct AppEnvironmentTests {
     }
 
     @Test @MainActor func limitsConcurrentServerPolls() async throws {
-        let deps = makeTestSettingsDeps()
-        let settings = AppSettings(userDefaults: deps.defaults, keychain: deps.keychain)
+        let defaults = makeTestDefaults()
+        let settings = AppSettings(userDefaults: defaults)
         let probe = PollConcurrencyProbe()
 
         let env = AppEnvironment(
@@ -321,8 +261,8 @@ struct AppEnvironmentTests {
             autoStartPolling: false
         )
 
-        for index in 0..<6 {
-            env.addServer(makeServer(id: UUID(), key: "k-\(index)", interval: 3_600))
+        for _ in 0..<6 {
+            env.addServer(makeServer(id: UUID(), interval: 3_600))
         }
 
         try? await Task.sleep(nanoseconds: 700_000_000)
@@ -331,15 +271,15 @@ struct AppEnvironmentTests {
     }
 
     @Test @MainActor func ignoringSecurityCheckPersistsPerServer() async throws {
-        let deps = makeTestSettingsDeps()
-        let settings = AppSettings(userDefaults: deps.defaults, keychain: deps.keychain)
+        let defaults = makeTestDefaults()
+        let settings = AppSettings(userDefaults: defaults)
         let env = AppEnvironment(
             settings: settings,
             pollingServiceFactory: { PollingService(config: $0, pollOverride: { PollResult() }) },
             notificationPermissionRequester: {},
             autoStartPolling: false
         )
-        let server = makeServer(id: UUID(), key: "k", interval: 3_600)
+        let server = makeServer(id: UUID(), interval: 3_600)
         env.addServer(server)
 
         env.setSecurityCheck("ssh.root", ignored: true)
@@ -347,14 +287,14 @@ struct AppEnvironmentTests {
         env.setSecurityCheck("ports", ignored: false)
 
         #expect(env.selectedServer?.ignoredSecurityChecks == ["ssh.root"])
-        let reloaded = AppSettings(userDefaults: deps.defaults, keychain: deps.keychain).loadServers()
+        let reloaded = AppSettings(userDefaults: defaults).loadServers()
         #expect(reloaded.first?.ignoredSecurityChecks == ["ssh.root"])
     }
 }
 
 // MARK: - Helpers
 
-private func makeServer(id: UUID, key: String, interval: Double = 30) -> ServerConfig {
+private func makeServer(id: UUID, interval: Double = 30) -> ServerConfig {
     ServerConfig(
         id: id,
         name: "Test",
@@ -362,8 +302,6 @@ private func makeServer(id: UUID, key: String, interval: Double = 30) -> ServerC
         sshUser: "root",
         sshKeyPath: "",
         sshPort: 22,
-        n8nBaseURL: "https://n8n.local",
-        n8nAPIKey: key,
         pollingInterval: interval,
         processCount: 10,
         processFilter: "",
@@ -372,11 +310,11 @@ private func makeServer(id: UUID, key: String, interval: Double = 30) -> ServerC
     )
 }
 
-private func makeTestSettingsDeps() -> (defaults: UserDefaults, keychain: MockKeychainStore) {
+private func makeTestDefaults() -> UserDefaults {
     let suiteName = "ServerPulseTests.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suiteName)!
     defaults.removePersistentDomain(forName: suiteName)
-    return (defaults, MockKeychainStore())
+    return defaults
 }
 
 private func makeStats(cpu: Double = 10, disk: Double = 40) -> ServerStats {
@@ -407,34 +345,6 @@ private actor PollConcurrencyProbe {
 
     func completedCount() -> Int {
         completed
-    }
-}
-
-private final class MockKeychainStore: KeychainStoring {
-    var values: [String: String] = [:]
-    var failSetAccounts = Set<String>()
-    var deletedAccounts = Set<String>()
-
-    @discardableResult
-    func set(_ value: String, account: String) -> Bool {
-        if failSetAccounts.contains(account) { return false }
-        if value.isEmpty {
-            values.removeValue(forKey: account)
-            return true
-        }
-        values[account] = value
-        return true
-    }
-
-    @discardableResult
-    func delete(account: String) -> Bool {
-        deletedAccounts.insert(account)
-        values.removeValue(forKey: account)
-        return true
-    }
-
-    func get(account: String) -> String? {
-        values[account]
     }
 }
 

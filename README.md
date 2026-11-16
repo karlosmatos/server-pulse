@@ -1,6 +1,6 @@
 # ServerPulse
 
-A macOS menu bar app that monitors **multiple Linux servers** — showing CPU/RAM/disk gauges, process list, Docker containers, systemd services, and n8n workflow status — all via SSH and the n8n REST API.
+A macOS menu bar app that monitors **multiple Linux servers** — showing CPU/RAM/disk gauges, process list, Docker containers, and systemd services — all via SSH.
 
 ## Features
 
@@ -10,7 +10,6 @@ A macOS menu bar app that monitors **multiple Linux servers** — showing CPU/RA
 - **Process monitoring**: top processes by CPU, or filter by name, with PID, CPU%, MEM%
 - **Docker containers**: status and resource usage for all running containers
 - **Systemd services**: active/inactive/failed state for named services
-- **n8n workflows**: active/inactive status and recent execution history
 - **Security audit**: read-only hardening checks (SSH root/password login, firewall, fail2ban/CrowdSec, automatic updates, pending security updates, reboot required, extra UID 0 accounts, publicly exposed ports, exposed Docker API, public SSH despite Tailscale/WireGuard, AppArmor/SELinux) with advice and a copyable fix command for each failure. "Ask AI" copies a ready-made prompt for Claude Code, Codex or another agent to plan the fixes. Hover a check to ignore it per server; the whole card can be turned off per server in Settings. Runs every 6 hours and on manual refresh; never uses sudo, so some checks show as unknown unless you connect as root
 - **One-click SSH**: open a terminal session to the selected server straight from the menu bar
 - **Notifications**: per-server alerts when a server goes offline or a monitored process stops
@@ -37,8 +36,6 @@ SSH_HOST=your.server.ip
 SSH_USER=root
 SSH_KEY_PATH=~/.ssh/id_ed25519
 SSH_PORT=22
-N8N_BASE_URL=https://your-n8n-instance.com
-N8N_API_KEY=your_api_key_here
 POLL_INTERVAL=30
 PROCESS_COUNT=10
 DOCKER_ENABLED=true
@@ -120,13 +117,13 @@ base64 -i developer_id_application.p12 | pbcopy
 
 ## Architecture
 
-Zero external dependencies — uses only the system SSH binary, `URLSession`, and `UserNotifications`.
+Zero external dependencies — uses only the system SSH binary and `UserNotifications`.
 
 ```text
 Sources/ServerPulse/
 ├── App/          — @main entry, @Observable multi-server state hub
-├── Models/       — ServerConfig, ServerState, stats, processes, n8n models
-├── Services/     — SSH, ping, n8n HTTP, .env loader, per-server polling
+├── Models/       — ServerConfig, ServerState, stats, processes, security audit
+├── Services/     — SSH, ping, .env loader, per-server polling
 ├── Settings/     — AppSettings (servers list), SettingsView, ServerEditView
 ├── Notifications/— per-server UNUserNotificationCenter integration
 └── Views/        — SwiftUI menu bar popover with server picker

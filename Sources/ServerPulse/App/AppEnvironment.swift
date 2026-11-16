@@ -9,8 +9,6 @@ final class AppEnvironment {
     var processes: [ServerProcess] = []
     var dockerContainers: [DockerContainer] = []
     var systemdServices: [SystemdService] = []
-    var workflows: [N8NWorkflow] = []
-    var recentExecutions: [N8NExecution] = []
     var securityChecks: [SecurityCheck] = []
     var lastSecurityAudit: Date?
     var lastUpdated: Date?
@@ -293,8 +291,6 @@ final class AppEnvironment {
         if result.didRefreshHeavyData {
             state.dockerContainers = result.dockerContainers
             state.systemdServices = result.systemdServices
-            state.workflows = result.workflows
-            state.recentExecutions = result.recentExecutions
             state.lastHeavyRefresh = Date()
         }
         if let checks = result.securityChecks {
@@ -322,8 +318,6 @@ final class AppEnvironment {
             processes = []
             dockerContainers = []
             systemdServices = []
-            workflows = []
-            recentExecutions = []
             securityChecks = []
             lastSecurityAudit = nil
             lastUpdated = nil
@@ -337,8 +331,6 @@ final class AppEnvironment {
         processes = state.processes
         dockerContainers = state.dockerContainers
         systemdServices = state.systemdServices
-        workflows = state.workflows
-        recentExecutions = state.recentExecutions
         securityChecks = state.securityChecks
         lastSecurityAudit = state.lastSecurityAudit
         lastUpdated = state.lastUpdated
