@@ -44,11 +44,8 @@ struct ServerIssue: Identifiable, Equatable {
 }
 
 enum ServerHealth {
-    /// How long a failed n8n execution keeps being reported as an issue.
-    static let executionErrorWindow: TimeInterval = 24 * 60 * 60
-
     /// Issues sorted most severe first.
-    static func issues(for state: ServerState, now: Date = Date()) -> [ServerIssue] {
+    static func issues(for state: ServerState) -> [ServerIssue] {
         if state.status == .offline {
             return [ServerIssue(
                 id: "offline",
@@ -105,22 +102,6 @@ enum ServerHealth {
                 severity: .warning,
                 symbol: "shippingbox",
                 message: listMessage(stoppedContainers.map(\.name), verb: "stopped")
-            ))
-        }
-
-        let failedExecutions = state.recentExecutions.filter { execution in
-            guard execution.status == "error" else { return false }
-            guard let started = execution.startedAt else { return true }
-            return now.timeIntervalSince(started) <= executionErrorWindow
-        }
-        if let latest = failedExecutions.first {
-            let name = latest.workflowName ?? "Workflow \(latest.id)"
-            let extra = failedExecutions.count > 1 ? " (+\(failedExecutions.count - 1) more)" : ""
-            issues.append(ServerIssue(
-                id: "n8n.failed",
-                severity: .warning,
-                symbol: "flowchart",
-                message: "\(name) failed\(extra)"
             ))
         }
 

@@ -10,8 +10,6 @@ struct ServerEditView: View {
     @State private var sshUser = ""
     @State private var sshKeyPath = ""
     @State private var sshPort = ""
-    @State private var n8nBaseURL = ""
-    @State private var n8nAPIKey = ""
     @State private var pollInterval = 30.0
     @State private var processCount = "10"
     @State private var processFilter = ""
@@ -66,16 +64,6 @@ struct ServerEditView: View {
                     }
                 }
 
-                SectionCard(icon: "flowchart", title: "n8n API", tint: .orange) {
-                    VStack(spacing: 10) {
-                        field("Base URL", $n8nBaseURL, "https://host:5678")
-                        HStack(spacing: 8) {
-                            Text("API Key").font(.caption).foregroundStyle(.secondary).frame(width: 56, alignment: .trailing)
-                            SecureField("Paste n8n API key", text: $n8nAPIKey).textFieldStyle(.roundedBorder).font(.caption)
-                        }
-                    }
-                }
-
                 SectionCard(icon: "clock.arrow.2.circlepath", title: "Polling", tint: .green) {
                     VStack(spacing: 6) {
                         Slider(value: $pollInterval, in: 10...300, step: 5)
@@ -105,8 +93,6 @@ struct ServerEditView: View {
             sshUser = config.sshUser
             sshKeyPath = config.sshKeyPath
             sshPort = config.sshPort == 22 && config.sshHost.isEmpty ? "" : String(config.sshPort)
-            n8nBaseURL = config.n8nBaseURL
-            n8nAPIKey = config.n8nAPIKey
             pollInterval = config.pollingInterval
             processCount = String(config.processCount)
             processFilter = config.processFilter
@@ -129,7 +115,6 @@ struct ServerEditView: View {
 
         let user = sshUser.trimmingCharacters(in: .whitespacesAndNewlines)
         let keyPath = sshKeyPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseURL = n8nBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedFilter = processFilter.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedServices = systemdServices.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -147,8 +132,6 @@ struct ServerEditView: View {
         updated.sshUser = user
         updated.sshKeyPath = keyPath
         updated.sshPort = clampedPort
-        updated.n8nBaseURL = baseURL
-        updated.n8nAPIKey = n8nAPIKey
         updated.pollingInterval = clampedInterval
         updated.processCount = clampedCount
         updated.processFilter = trimmedFilter

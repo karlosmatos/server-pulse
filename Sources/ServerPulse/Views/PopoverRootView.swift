@@ -52,7 +52,6 @@ struct PopoverRootView: View {
                 containersAndServices
                 if showsSecurity, hasCriticalSecurityIssue { SecurityView() }
                 if !appEnv.processes.isEmpty { ProcessListView() }
-                if !appEnv.workflows.isEmpty || !appEnv.recentExecutions.isEmpty { N8NView() }
                 // Security changes rarely, so it sits at the bottom unless something is critical.
                 if showsSecurity, !hasCriticalSecurityIssue { SecurityView() }
             }

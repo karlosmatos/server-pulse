@@ -7,8 +7,6 @@ struct PollResult {
     var processes: [ServerProcess] = []
     var dockerContainers: [DockerContainer] = []
     var systemdServices: [SystemdService] = []
-    var workflows: [N8NWorkflow] = []
-    var recentExecutions: [N8NExecution] = []
     var errorMessage: String?
     var didRefreshHeavyData: Bool = false
     /// nil when the audit was not requested or could not run.
@@ -20,7 +18,6 @@ struct PollingService {
     let instanceID: UUID
     let config: ServerConfig
     let ssh: SSHClient
-    let n8n: N8NClient
     let notifications: NotificationManager
     private let pollOverride: (() async -> PollResult)?
 
@@ -28,7 +25,6 @@ struct PollingService {
         self.instanceID = UUID()
         self.config = config
         self.ssh = SSHClient(config: config)
-        self.n8n = N8NClient(config: config)
         self.notifications = NotificationManager(serverName: config.name, serverID: config.id)
         self.pollOverride = pollOverride
     }
@@ -38,27 +34,10 @@ struct PollingService {
             return await pollOverride()
         }
 
-        let baseURL = config.n8nBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        let scheme = URL(string: baseURL)?.scheme?.lowercased()
-        let hasN8NConfig = includeHeavyData && !config.n8nAPIKey.isEmpty && !baseURL.isEmpty
-        let shouldPollN8N = hasN8NConfig && scheme == "https"
-        let n8nConfigError = hasN8NConfig && scheme != "https" ? "n8n URL must start with https://" : nil
         let snapshotCommand = SSHCommandParser.snapshotCommand(config: config, includeHeavyData: includeHeavyData)
 
         let pollStart = ProcessInfo.processInfo.systemUptime
-        async let snapshotTimed = Self.measure { try? await ssh.run(snapshotCommand) }
-        async let workflowsTimed: ([N8NWorkflow]?, TimeInterval) = shouldPollN8N
-            ? Self.measure { try? await n8n.fetchWorkflows() }
-            : (nil, 0)
-        async let executionsTimed: ([N8NExecution]?, TimeInterval) = shouldPollN8N
-            ? Self.measure { try? await n8n.fetchRecentExecutions() }
-            : (nil, 0)
-
-        let ((snapshot, snapshotDuration), (wf, workflowsDuration), (exec, executionsDuration)) = await (
-            snapshotTimed,
-            workflowsTimed,
-            executionsTimed
-        )
+        let (snapshot, snapshotDuration) = await Self.measure { try? await ssh.run(snapshotCommand) }
 
         var result = PollResult()
         let sections = snapshot.map(SSHCommandParser.parseSnapshot(from:)) ?? [:]
@@ -78,9 +57,6 @@ struct PollingService {
         } else {
             result.status = .online
         }
-        if result.errorMessage == nil {
-            result.errorMessage = n8nConfigError
-        }
 
         // Parse stats
         let ramParsed  = ram.flatMap  { SSHCommandParser.parseRAM(from: $0) }
@@ -99,8 +75,6 @@ struct PollingService {
         result.processes        = ps.map { SSHCommandParser.parseProcesses(from: $0) } ?? []
         result.dockerContainers = docker.map { SSHCommandParser.parseDockerOutput(from: $0) } ?? []
         result.systemdServices  = systemd.map { SSHCommandParser.parseSystemdServices(from: $0) } ?? []
-        result.workflows        = wf   ?? []
-        result.recentExecutions = exec ?? []
         result.didRefreshHeavyData = includeHeavyData
 
         // Runs after the snapshot so it reuses the SSH ControlMaster connection.
@@ -117,8 +91,6 @@ struct PollingService {
         logDiagnostics(
             totalDuration: totalDuration,
             snapshotDuration: snapshotDuration,
-            workflowsDuration: workflowsDuration,
-            executionsDuration: executionsDuration,
             includeHeavyData: includeHeavyData
         )
 
@@ -129,13 +101,11 @@ struct PollingService {
     private func logDiagnostics(
         totalDuration: TimeInterval,
         snapshotDuration: TimeInterval,
-        workflowsDuration: TimeInterval,
-        executionsDuration: TimeInterval,
         includeHeavyData: Bool
     ) {
         guard totalDuration >= 2 else { return }
         Self.logger.notice(
-            "Slow poll for \(self.config.name, privacy: .public): total=\(totalDuration, format: .fixed(precision: 2))s snapshot=\(snapshotDuration, format: .fixed(precision: 2))s workflows=\(workflowsDuration, format: .fixed(precision: 2))s executions=\(executionsDuration, format: .fixed(precision: 2))s heavy=\(includeHeavyData, privacy: .public)"
+            "Slow poll for \(self.config.name, privacy: .public): total=\(totalDuration, format: .fixed(precision: 2))s snapshot=\(snapshotDuration, format: .fixed(precision: 2))s heavy=\(includeHeavyData, privacy: .public)"
         )
     }
 

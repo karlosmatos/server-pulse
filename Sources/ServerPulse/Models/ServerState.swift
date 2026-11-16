@@ -6,8 +6,6 @@ struct ServerState {
     var processes: [ServerProcess] = []
     var dockerContainers: [DockerContainer] = []
     var systemdServices: [SystemdService] = []
-    var workflows: [N8NWorkflow] = []
-    var recentExecutions: [N8NExecution] = []
     var lastUpdated: Date?
     var lastHeavyRefresh: Date?
     var securityChecks: [SecurityCheck] = []

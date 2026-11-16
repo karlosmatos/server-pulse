@@ -1,40 +1,12 @@
 import Foundation
 import ServiceManagement
 
-protocol KeychainStoring {
-    @discardableResult
-    func set(_ value: String, account: String) -> Bool
-
-    @discardableResult
-    func delete(account: String) -> Bool
-
-    func get(account: String) -> String?
-}
-
-struct SystemKeychainStore: KeychainStoring {
-    @discardableResult
-    func set(_ value: String, account: String) -> Bool {
-        KeychainHelper.set(value, account: account)
-    }
-
-    @discardableResult
-    func delete(account: String) -> Bool {
-        KeychainHelper.delete(account: account)
-    }
-
-    func get(account: String) -> String? {
-        KeychainHelper.get(account: account)
-    }
-}
-
 final class AppSettings {
     private let userDefaults: UserDefaults
-    private let keychain: any KeychainStoring
     private var cachedServers: [ServerConfig]?
 
-    init(userDefaults: UserDefaults = .standard, keychain: any KeychainStoring = SystemKeychainStore()) {
+    init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
-        self.keychain = keychain
     }
 
     // Global (not per-server)
@@ -60,29 +32,13 @@ final class AppSettings {
             return []
         }
 
-        var configs = (try? JSONDecoder().decode([ServerConfig].self, from: data)) ?? []
-        migrateLegacyN8NKeysIfNeeded(&configs)
+        let configs = (try? JSONDecoder().decode([ServerConfig].self, from: data)) ?? []
         cachedServers = configs
         return configs
     }
 
     @discardableResult
     func saveServers(_ newValue: [ServerConfig]) -> Bool {
-        let previous = cachedServers ?? loadServers()
-        let previousIDs = Set(previous.map(\.id))
-        let newIDs = Set(newValue.map(\.id))
-
-        for removedID in previousIDs.subtracting(newIDs) {
-            _ = keychain.delete(account: removedID.uuidString)
-        }
-
-        for server in newValue {
-            if !keychain.set(server.n8nAPIKey, account: server.id.uuidString) {
-                print("Failed to persist n8n API key for server: \(server.id.uuidString)")
-                return false
-            }
-        }
-
         guard let data = try? JSONEncoder().encode(newValue) else {
             print("Failed to encode servers list")
             return false
@@ -133,31 +89,4 @@ final class AppSettings {
         "poll.interval", "process.count", "process.filter",
         "docker.enabled", "systemd.services",
     ]
-
-    private func migrateLegacyN8NKeysIfNeeded(_ configs: inout [ServerConfig]) {
-        var needsResave = false
-
-        for i in configs.indices {
-            let account = configs[i].id.uuidString
-            if let keychainKey = keychain.get(account: account), !keychainKey.isEmpty {
-                configs[i].n8nAPIKey = keychainKey
-                continue
-            }
-
-            let legacyKey = configs[i].n8nAPIKey
-            if !legacyKey.isEmpty {
-                if keychain.set(legacyKey, account: account) {
-                    needsResave = true
-                    configs[i].n8nAPIKey = legacyKey
-                }
-                continue
-            }
-
-            configs[i].n8nAPIKey = ""
-        }
-
-        if needsResave, let clean = try? JSONEncoder().encode(configs) {
-            userDefaults.set(clean, forKey: "servers.list")
-        }
-    }
 }
