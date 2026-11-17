@@ -150,6 +150,7 @@ struct SettingsView: View {
                         Text("Terminal.app").tag("terminal")
                         Text("iTerm2").tag("iterm")
                         Text("cmux").tag("cmux")
+                        Text("Herdr").tag("herdr")
                     }
                     .pickerStyle(.segmented)
                     .font(.caption)
