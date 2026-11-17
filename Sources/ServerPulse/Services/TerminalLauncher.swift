@@ -30,6 +30,8 @@ enum TerminalLauncher {
             return "iTerm2"
         case "cmux":
             return "cmux"
+        case "herdr":
+            return "Herdr"
         default:
             return "Terminal.app"
         }
@@ -46,14 +48,15 @@ enum TerminalLauncher {
             logger.error("\(issue.message, privacy: .public)")
             return issue
         }
-        let command: String
+        let arguments: [String]
         do {
-            command = try sshCommand(for: config)
+            arguments = try sshArguments(for: config)
         } catch {
             let message = error.localizedDescription
             logger.error("\(message, privacy: .public)")
             return TerminalLaunchIssue.error(message)
         }
+        let command = arguments.map(shellQuote).joined(separator: " ")
 
         switch terminalApp.lowercased() {
         case "iterm", "iterm2":
@@ -70,6 +73,8 @@ enum TerminalLauncher {
                 bundleIdentifier: "com.cmuxterm.app",
                 onDeferredIssue: onDeferredIssue
             )
+        case "herdr":
+            return openSSHInHerdr(config: config, sshArguments: arguments, onDeferredIssue: onDeferredIssue)
         default:
             guard let scriptURL = createScript(command: command) else {
                 return TerminalLaunchIssue.error("ServerPulse couldn't create the temporary SSH launcher. Check Console for details.")
@@ -112,13 +117,116 @@ enum TerminalLauncher {
         return nil
     }
 
-    private static func sshCommand(for config: ServerConfig) throws -> String {
+    /// Herdr has no file-open handler, so drive its CLI (`Herdr do space.new`) instead.
+    /// A server already added as a Herdr machine opens there natively; otherwise a local space runs ssh.
+    /// The CLI only talks to an open window, so launch/activate the app first and retry while it starts.
+    private static func openSSHInHerdr(
+        config: ServerConfig,
+        sshArguments: [String],
+        onDeferredIssue: @escaping @MainActor (TerminalLaunchIssue) -> Void
+    ) -> TerminalLaunchIssue? {
+        guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "dev.herdr.app"),
+              let executableURL = Bundle(url: appURL)?.executableURL else {
+            logger.error("Herdr bundle identifier could not be resolved")
+            return TerminalLaunchIssue.error("Herdr wasn't found. Install it or pick another terminal app in Settings.")
+        }
+        let destination = sshArguments.last ?? ""
+
+        let cfg = NSWorkspace.OpenConfiguration()
+        cfg.activates = true
+        NSWorkspace.shared.openApplication(at: appURL, configuration: cfg) { _, error in
+            if let error {
+                logger.error("Herdr launch failed: \(error.localizedDescription, privacy: .public)")
+                Task { @MainActor in
+                    onDeferredIssue(.error("ServerPulse couldn't open Herdr: \(error.localizedDescription)"))
+                }
+                return
+            }
+            DispatchQueue.global().async {
+                var payload: [String: Any] = ["name": config.name]
+                if let machine = herdrMachine(destination: destination, host: config.sshHost) {
+                    payload["machine"] = machine
+                } else {
+                    payload["machine"] = ""
+                    payload["argv"] = sshArguments
+                }
+                guard let failure = runHerdrNewSpace(executableURL: executableURL, payload: payload) else { return }
+                logger.error("Herdr space.new failed: \(failure, privacy: .public)")
+                Task { @MainActor in
+                    onDeferredIssue(.error("ServerPulse couldn't open a Herdr session: \(failure)"))
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Name of the Herdr machine (`hc machine ls`) that reaches this server, if any.
+    private static func herdrMachine(destination: String, host: String) -> String? {
+        let coreURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".local/bin/herdr-core")
+        guard FileManager.default.isExecutableFile(atPath: coreURL.path) else { return nil }
+
+        let result = runProcess(coreURL, arguments: ["machine", "ls", "--json"])
+        guard result.status == 0,
+              let object = try? JSONSerialization.jsonObject(with: result.output) as? [String: Any],
+              let machines = object["machines"] as? [[String: Any]] else {
+            logger.error("herdr-core machine ls failed: \(result.error, privacy: .public)")
+            return nil
+        }
+        let match = machines.first { machine in
+            machine["target"] as? String == destination
+                || machine["name"] as? String == host
+                || machine["host"] as? String == host
+        }
+        return match?["name"] as? String
+    }
+
+    /// Returns nil on success, otherwise the last error output.
+    private static func runHerdrNewSpace(executableURL: URL, payload: [String: Any], attempts: Int = 20) -> String? {
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let json = String(data: data, encoding: .utf8) else {
+            return "couldn't encode the Herdr command"
+        }
+        var lastError = "unknown error"
+        for attempt in 1...attempts {
+            let result = runProcess(executableURL, arguments: ["do", "space.new", json])
+            if result.status == 0 { return nil }
+            let output = String(data: result.output, encoding: .utf8) ?? ""
+            lastError = [result.error, output]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+            if attempt < attempts { Thread.sleep(forTimeInterval: 0.5) }
+        }
+        return lastError
+    }
+
+    private static func runProcess(_ url: URL, arguments: [String]) -> (status: Int32, output: Data, error: String) {
+        let process = Process()
+        process.executableURL = url
+        process.arguments = arguments
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+        do {
+            try process.run()
+        } catch {
+            return (-1, Data(), error.localizedDescription)
+        }
+        let output = stdout.fileHandleForReading.readDataToEndOfFile()
+        let errorOutput = stderr.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return (process.terminationStatus, output, String(data: errorOutput, encoding: .utf8) ?? "")
+    }
+
+    private static func sshArguments(for config: ServerConfig) throws -> [String] {
         let destination = try SSHConfigValidator.destination(for: config)
-        var args = ["ssh", "-i", shellQuote(config.resolvedKeyPath)]
+        var args = ["ssh", "-i", config.resolvedKeyPath]
         if config.sshPort != 22 { args += ["-p", String(config.sshPort)] }
         args.append("--")
-        args.append(shellQuote(destination))
-        return args.joined(separator: " ")
+        args.append(destination)
+        return args
     }
 
     private static func createScript(command: String) -> URL? {
