@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 struct PopoverRootView: View {
     let updater: SPUUpdater
+    let updateReminder: UpdateReminder
     @Environment(AppEnvironment.self) private var appEnv
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showSettings = false
@@ -130,7 +131,15 @@ struct PopoverRootView: View {
     private var footer: some View {
         HStack(spacing: 12) {
             Button { updater.checkForUpdates() } label: {
-                Text("Check for Updates…")
+                if let version = updateReminder.availableVersion {
+                    HStack(spacing: 5) {
+                        Circle().fill(Color.accentColor).frame(width: 6, height: 6)
+                        Text("Update available: \(version)")
+                    }
+                    .foregroundStyle(.primary)
+                } else {
+                    Text("Check for Updates…")
+                }
             }
             .buttonStyle(.plain)
 
